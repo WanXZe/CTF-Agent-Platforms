@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ctf-platform-skill"
+version = "1.0.0"
+description = "CTF 靶场平台 Agent Skill 插件 —— 封装题目查询/下载/容器启停/Flag提交等接口"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "AGPL-3.0"}
+dependencies = [
+    "httpx>=0.27.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[tool.setuptools.packages.find]
+include = ["ctf_platform_skill*"]
+
+[tool.setuptools.package-data]
+ctf_platform_skill = [
+    "platforms/*/skill.py",
+    "platforms/*/config.yaml",
+    "platforms/*/README.md",
+    "readme_to_skill/templates/*",
+]

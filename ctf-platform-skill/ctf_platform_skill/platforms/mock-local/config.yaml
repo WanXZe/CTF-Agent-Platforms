@@ -1,0 +1,18 @@
+api_base_url: http://localhost:8080
+api_path: /slab-match/api/v1/agent
+access_key_env: MOCK_ACCESS_KEY
+timeout: 30
+meta:
+  name: 本地 Mock 靶场
+  icon: 🖥
+  description: 本地开发调试用，6道模拟题
+  type: slab
+llm:
+  default_model: qwen-plus
+  temperature: 0.7
+  max_tokens: 4096
+auto_solve:
+  enabled: false
+  auto_download: true
+  auto_start_container: true
+  batch_start_unsolved: false

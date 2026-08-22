@@ -1,0 +1,23 @@
+# CTFd 兼容平台配置（非敏感信息）
+# 密钥统一放在项目根目录 .env，通过 access_key_env 引用
+api_base_url: "https://ctfd.example.com"
+api_path: "/api/v1"
+access_key_env: "CTFD_TOKEN"
+timeout: 30
+
+meta:
+  name: "CTFd 平台"
+  icon: "🏁"
+  description: "通用 CTFd 兼容平台"
+  type: "ctfd"
+
+llm:
+  default_model: "qwen-plus"
+  temperature: 0.7
+  max_tokens: 4096
+
+auto_solve:
+  enabled: false
+  auto_download: true
+  auto_start_container: true
+  batch_start_unsolved: false

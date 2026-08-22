@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ctf-agent"
+version = "2.0.0"
+description = "CTF 智能体解题平台（重构版）—— 分层架构 + Skill 插件 + 容器控制"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "AGPL-3.0"}
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[tool.setuptools.packages.find]
+include = ["config*", "core*", "web*", "utils*"]

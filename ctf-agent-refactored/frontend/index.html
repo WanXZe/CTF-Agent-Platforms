@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CTF-Agent 控制台</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --radius:10px;--radius-sm:6px;--transition:.18s cubic-bezier(.4,0,.2,1);
+}
+[data-theme="dark"]{
+  --bg:#0b0d12;--bg-elev:#14171f;--bg-card:#181c26;--bg-hover:#1f2430;
+  --border:#262b3a;--border-light:#32384a;
+  --text:#e8eaf2;--text-dim:#8b90a5;--text-mute:#5c6178;
+  --accent:#6e8cff;--accent-hover:#5a7af0;--accent-glow:rgba(110,140,255,.15);
+  --green:#4ade80;--green-bg:rgba(74,222,128,.12);
+  --yellow:#fbbf24;--yellow-bg:rgba(251,191,36,.12);
+  --red:#f87171;--red-bg:rgba(248,113,113,.12);
+  --blue:#38bdf8;--blue-bg:rgba(56,189,248,.12);
+  --purple:#a78bfa;--purple-bg:rgba(167,139,250,.12);
+  --terminal-bg:#0d1117;--terminal-text:#c9d1d9;
+}
+[data-theme="light"]{
+  --bg:#f5f6fa;--bg-elev:#ffffff;--bg-card:#ffffff;--bg-hover:#f0f1f5;
+  --border:#e2e4ea;--border-light:#d0d3dc;
+  --text:#1a1d29;--text-dim:#5a5f72;--text-mute:#9096a8;
+  --accent:#4f6ef7;--accent-hover:#3d5ce5;--accent-glow:rgba(79,110,247,.1);
+  --green:#16a34a;--green-bg:rgba(22,163,74,.1);
+  --yellow:#d97706;--yellow-bg:rgba(217,119,6,.1);
+  --red:#dc2626;--red-bg:rgba(220,38,38,.1);
+  --blue:#0284c7;--blue-bg:rgba(2,132,199,.1);
+  --purple:#7c3aed;--purple-bg:rgba(124,58,237,.1);
+  --terminal-bg:#1e1e2e;--terminal-text:#cdd6f4;
+}
+html{font-size:14px}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5;transition:background .3s,color .3s}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select,textarea{font-family:inherit}
+a{color:var(--accent);text-decoration:none}
+
+/* Layout */
+.app-layout{display:flex;min-height:100vh}
+.sidebar{width:240px;min-width:240px;background:var(--bg-elev);border-right:1px solid var(--border);display:flex;flex-direction:column;transition:width .25s ease,min-width .25s ease;overflow:hidden;z-index:40}
+.sidebar.collapsed{width:0;min-width:0;border-right:none}
+.sidebar-head{padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;white-space:nowrap}
+.sidebar-logo{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--purple));display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff;flex-shrink:0}
+.sidebar-title{font-weight:700;font-size:14px;white-space:nowrap}
+.sidebar-title span{color:var(--accent)}
+.sidebar-section{padding:12px 12px 8px;font-size:11px;color:var(--text-mute);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+.platform-list{flex:1;overflow-y:auto;padding:0 8px}
+.platform-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);cursor:pointer;transition:var(--transition);margin-bottom:4px;white-space:nowrap}
+.platform-item:hover{background:var(--bg-hover)}
+.platform-item.active{background:var(--accent-glow);border-left:3px solid var(--accent);padding-left:9px}
+.platform-icon{width:28px;height:28px;border-radius:6px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.platform-info{flex:1;min-width:0}
+.platform-name{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis}
+.platform-desc{font-size:11px;color:var(--text-mute);overflow:hidden;text-overflow:ellipsis}
+.platform-add{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:var(--radius-sm);cursor:pointer;color:var(--text-dim);transition:var(--transition);margin:4px 8px;border:1px dashed var(--border);justify-content:center;font-size:12px}
+.platform-add:hover{color:var(--accent);border-color:var(--accent)}
+.sidebar-foot{padding:12px;border-top:1px solid var(--border);white-space:nowrap}
+.sidebar-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim)}
+.conn-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green)}
+.conn-dot.off{background:var(--red);box-shadow:none}
+
+/* Topbar */
+.sidebar-toggle{position:fixed;top:12px;left:12px;z-index:50;width:32px;height:32px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--text-dim);transition:var(--transition)}
+.sidebar-toggle:hover{border-color:var(--accent);color:var(--accent)}
+.main-content{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{position:sticky;top:0;z-index:30;background:var(--bg-elev);border-bottom:1px solid var(--border);padding:0 20px 0 52px;height:52px;display:flex;align-items:center;gap:12px}
+.current-platform-badge{display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;transition:var(--transition)}
+.current-platform-badge:hover{border-color:var(--accent)}
+.topbar-spacer{flex:1}
+.topbar-actions{display:flex;gap:6px;align-items:center}
+.icon-btn{width:32px;height:32px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--text-dim);transition:var(--transition)}
+.icon-btn:hover{border-color:var(--accent);color:var(--accent)}
+.icon-btn.active{background:var(--accent-glow);border-color:var(--accent);color:var(--accent)}
+
+/* Tabs */
+.tab-bar{display:flex;gap:2px;padding:0 20px;background:var(--bg-elev);border-bottom:1px solid var(--border)}
+.tab-btn{padding:10px 16px;font-size:12px;color:var(--text-dim);border-bottom:2px solid transparent;transition:var(--transition);white-space:nowrap}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+
+/* Main */
+.main{max-width:1200px;margin:0 auto;padding:16px 20px 60px;width:100%}
+.tab-panel{display:none}
+.tab-panel.active{display:block;animation:fadeIn .25s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+/* Platform detail header */
+.platform-header{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.platform-header-icon{width:44px;height:44px;border-radius:10px;background:var(--accent-glow);display:flex;align-items:center;justify-content:center;font-size:22px}
+.platform-header-info{flex:1;min-width:200px}
+.platform-header-name{font-size:16px;font-weight:700}
+.platform-header-desc{font-size:12px;color:var(--text-dim);margin-top:2px}
+.platform-header-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* Auto-solve toggles */
+.config-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:16px}
+.config-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.config-card-title{font-size:11px;color:var(--text-mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0}
+.toggle-label{font-size:12px;color:var(--text-dim)}
+.toggle{position:relative;width:36px;height:20px;background:var(--border);border-radius:10px;cursor:pointer;transition:var(--transition);flex-shrink:0}
+.toggle.on{background:var(--accent)}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:var(--transition)}
+.toggle.on::after{left:18px}
+
+/* Filter bar */
+.filter-bar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.search-box{flex:1;min-width:180px;position:relative}
+.search-box input{width:100%;padding:8px 10px 8px 30px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px;transition:var(--transition)}
+.search-box input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+.search-icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-mute);font-size:13px}
+.filter-select{padding:8px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px;cursor:pointer}
+.filter-select:focus{outline:none;border-color:var(--accent)}
+.refresh-btn{padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px;transition:var(--transition);display:flex;align-items:center;gap:5px}
+.refresh-btn:hover{border-color:var(--accent);color:var(--accent)}
+.refresh-btn.spinning .icon{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Challenge cards */
+.challenge-list{display:flex;flex-direction:column;gap:7px}
+.ch-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;transition:var(--transition);animation:fadeIn .3s ease}
+.ch-card:hover{border-color:var(--border-light);background:var(--bg-hover)}
+.ch-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ch-id{font-family:"SF Mono",Consolas,monospace;font-size:11px;color:var(--text-mute);background:var(--bg);padding:2px 6px;border-radius:4px}
+.ch-name{font-size:13px;font-weight:600;flex:1;min-width:120px;cursor:pointer}
+.ch-name:hover{color:var(--accent)}
+.ch-meta{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.badge{padding:2px 7px;border-radius:4px;font-size:10px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:3px}
+.badge-cat{background:var(--accent-glow);color:var(--accent)}
+.badge-val{background:var(--green-bg);color:var(--green)}
+.badge-solved{background:var(--green-bg);color:var(--green)}
+.badge-unsolved{background:var(--yellow-bg);color:var(--yellow)}
+.badge-need-env{background:var(--blue-bg);color:var(--blue)}
+.badge-no-env{background:rgba(139,144,165,.1);color:var(--text-mute)}
+.ch-actions{display:flex;gap:5px;margin-left:auto}
+.btn{padding:5px 10px;border-radius:var(--radius-sm);font-size:11px;font-weight:500;transition:var(--transition);display:inline-flex;align-items:center;gap:4px;border:1px solid transparent}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-ghost{background:transparent;border-color:var(--border);color:var(--text-dim)}
+.btn-ghost:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover:not(:disabled){background:var(--accent-hover)}
+.btn-green{background:var(--green);color:#fff}
+.btn-green:hover:not(:disabled){opacity:.85}
+.btn-red{background:var(--red);color:#fff}
+.btn-red:hover:not(:disabled){opacity:.85}
+.btn-purple{background:var(--purple);color:#fff}
+.btn-purple:hover:not(:disabled){opacity:.85}
+.btn-sm{padding:3px 8px;font-size:10px}
+
+.env-section{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.env-status{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600}
+.env-status .dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.env-status .dot.pulse{animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.env-not_started{background:rgba(139,144,165,.12);color:var(--text-mute)}
+.env-starting{background:var(--yellow-bg);color:var(--yellow)}
+.env-running{background:var(--green-bg);color:var(--green)}
+.env-stopped{background:rgba(139,144,165,.12);color:var(--text-mute)}
+.env-failed{background:var(--red-bg);color:var(--red)}
+.env-url{font-family:"SF Mono",Consolas,monospace;font-size:10px;color:var(--blue);background:var(--bg);padding:2px 7px;border-radius:4px;cursor:pointer;transition:var(--transition)}
+.env-url:hover{text-decoration:underline;background:var(--bg-hover)}
+
+/* Token stats */
+.stats-summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.stat-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.stat-card-label{font-size:11px;color:var(--text-mute);text-transform:uppercase;letter-spacing:.5px}
+.stat-card-value{font-size:22px;font-weight:700;margin-top:4px}
+.stat-card-value.green{color:var(--green)}
+.stat-card-value.red{color:var(--red)}
+.stat-card-value.blue{color:var(--blue)}
+.stat-card-value.accent{color:var(--accent)}
+.stats-table{width:100%;border-collapse:collapse;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.stats-table th{padding:10px 12px;text-align:left;font-size:11px;color:var(--text-mute);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);background:var(--bg-elev)}
+.stats-table td{padding:10px 12px;font-size:12px;border-bottom:1px solid var(--border)}
+.stats-table tr:last-child td{border-bottom:none}
+.stats-table tr:hover{background:var(--bg-hover)}
+.hit-badge{color:var(--green);font-weight:600}
+.miss-badge{color:var(--red);font-weight:600}
+
+/* Settings */
+.settings-section{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:16px}
+.settings-section h3{font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.settings-row{display:flex;gap:12px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap}
+.settings-field{flex:1;min-width:150px}
+.settings-field label{display:block;font-size:11px;color:var(--text-mute);margin-bottom:4px}
+.settings-field input{width:100%;padding:7px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:12px}
+.settings-field input:focus{outline:none;border-color:var(--accent)}
+.model-list{display:flex;flex-direction:column;gap:8px}
+.model-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm)}
+.model-item-info{flex:1}
+.model-item-name{font-size:12px;font-weight:600}
+.model-item-meta{font-size:11px;color:var(--text-mute)}
+.env-note{font-size:11px;color:var(--text-mute);background:var(--accent-glow);padding:8px 12px;border-radius:var(--radius-sm);margin-top:8px}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:200;display:none;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;width:100%;max-width:800px;max-height:85vh;display:flex;flex-direction:column;animation:modalIn .25s ease}
+@keyframes modalIn{from{transform:scale(.95);opacity:0}to{transform:scale(1);opacity:1}}
+.modal-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.modal-head h3{font-size:14px;font-weight:600}
+.modal-close{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text-dim);transition:var(--transition);font-size:15px}
+.modal-close:hover{background:var(--bg-hover);color:var(--text)}
+.modal-body{padding:18px;overflow-y:auto;flex:1}
+.modal-body pre{background:var(--bg);padding:14px;border-radius:var(--radius);font-size:11px;line-height:1.7;white-space:pre-wrap;word-break:break-word;color:var(--text)}
+
+/* Terminal / solve log */
+.terminal{background:var(--terminal-bg);border-radius:var(--radius);padding:14px;font-family:"SF Mono",Consolas,"Courier New",monospace;font-size:12px;line-height:1.7;max-height:400px;overflow-y:auto;border:1px solid var(--border)}
+.terminal-line{margin-bottom:4px;display:flex;gap:8px}
+.terminal-time{color:#6c7086;flex-shrink:0}
+.terminal-type{flex-shrink:0;font-weight:600;min-width:60px}
+.terminal-type.think{color:#89b4fa}
+.terminal-type.tool{color:#a6e3a1}
+.terminal-type.command{color:#f9e2af}
+.terminal-type.output{color:#cdd6f4}
+.terminal-type.error{color:#f38ba8}
+.terminal-type.flag{color:#fab387}
+.terminal-type.system{color:#74c7ec}
+.terminal-content{color:var(--terminal-text);word-break:break-word;flex:1}
+.solve-status{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--radius-sm);font-size:11px;font-weight:600}
+.solve-status.idle{background:rgba(139,144,165,.12);color:var(--text-mute)}
+.solve-status.running{background:var(--yellow-bg);color:var(--yellow)}
+.solve-status.success{background:var(--green-bg);color:var(--green)}
+.solve-status.failed{background:var(--red-bg);color:var(--red)}
+
+/* States */
+.loading-state,.empty-state{text-align:center;padding:50px 20px;color:var(--text-dim)}
+.spinner{display:inline-block;width:24px;height:24px;border:2.5px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+
+/* Toast - fixed at bottom-right to avoid topbar overlap */
+.toast-wrap{position:fixed;bottom:20px;right:20px;z-index:300;display:flex;flex-direction:column;gap:6px}
+.toast{padding:10px 16px;border-radius:var(--radius);font-size:12px;max-width:360px;animation:toastIn .25s ease;box-shadow:0 4px 16px rgba(0,0,0,.3)}
+@keyframes toastIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast-success{background:var(--green-bg);border:1px solid var(--green);color:var(--green)}
+.toast-error{background:var(--red-bg);border:1px solid var(--red);color:var(--red)}
+.toast-info{background:var(--blue-bg);border:1px solid var(--blue);color:var(--blue)}
+
+@media(max-width:640px){
+  .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:45}
+  .sidebar.collapsed{transform:translateX(-100%)}
+  .topbar{padding-left:48px}
+  .stats-bar{display:none}
+}
+</style>
+</head>
+<body>
+<div class="app-layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head"><div class="sidebar-logo">C</div><div class="sidebar-title">CTF-<span>Agent</span></div></div>
+    <div class="sidebar-section">靶场平台</div>
+    <div class="platform-list" id="platformList"><div class="loading-state" style="padding:20px"><div class="spinner"></div></div></div>
+    <div class="platform-add" onclick="showAddPlatformHint()">+ 添加平台</div>
+    <div class="sidebar-foot"><div class="sidebar-status"><span class="conn-dot off" id="connDot"></span><span id="connText">未连接</span></div></div>
+  </aside>
+  <button class="sidebar-toggle" onclick="toggleSidebar()" title="切换侧边栏">☰</button>
+  <div class="main-content">
+    <header class="topbar">
+      <div class="current-platform-badge" onclick="toggleSidebar()"><span id="curPlatIcon">📦</span> <span id="curPlatName">选择平台</span></div>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-actions">
+        <button class="icon-btn" onclick="toggleTheme()" title="切换主题" id="themeBtn">🌙</button>
+        <button class="icon-btn" onclick="switchTab('challenges')" title="题目列表">📋</button>
+        <button class="icon-btn" onclick="switchTab('stats')" title="Token统计">📊</button>
+        <button class="icon-btn" onclick="switchTab('settings')" title="设置">⚙</button>
+      </div>
+    </header>
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="challenges" onclick="switchTab('challenges')">题目列表</button>
+      <button class="tab-btn" data-tab="stats" onclick="switchTab('stats')">Token 统计</button>
+      <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">设置</button>
+    </div>
+    <div class="main">
+      <!-- Challenges Tab -->
+      <div class="tab-panel active" id="tab-challenges">
+        <div id="platformHeader" style="display:none">
+          <div class="platform-header">
+            <div class="platform-header-icon" id="phIcon">📦</div>
+            <div class="platform-header-info">
+              <div class="platform-header-name" id="phName">平台名称</div>
+              <div class="platform-header-desc" id="phDesc">平台描述</div>
+            </div>
+            <div class="platform-header-actions">
+              <button class="btn btn-purple btn-sm" onclick="batchStartContainers()">🚀 启动未解出题目容器</button>
+              <button class="btn btn-ghost btn-sm" onclick="loadChallenges()">↻ 刷新题目</button>
+            </div>
+          </div>
+          <div class="config-grid" id="autoSolveConfig">
+            <div class="config-card">
+              <div class="config-card-title">自动解题</div>
+              <div class="toggle-row"><span class="toggle-label">获取新题时自动下载并启动容器解题</span><div class="toggle" id="tgAutoSolve" onclick="toggleConfig('auto_solve.enabled', this)"></div></div>
+              <div class="toggle-row"><span class="toggle-label">自动下载附件</span><div class="toggle" id="tgAutoDownload" onclick="toggleConfig('auto_solve.auto_download', this)"></div></div>
+              <div class="toggle-row"><span class="toggle-label">自动启动容器</span><div class="toggle" id="tgAutoStart" onclick="toggleConfig('auto_solve.auto_start_container', this)"></div></div>
+            </div>
+            <div class="config-card">
+              <div class="config-card-title">平台信息</div>
+              <div class="toggle-row"><span class="toggle-label">API 地址</span><span style="font-size:11px;color:var(--text-dim);font-family:monospace" id="phApiUrl">-</span></div>
+              <div class="toggle-row"><span class="toggle-label">类型</span><span style="font-size:11px;color:var(--text-dim)" id="phType">-</span></div>
+              <div class="toggle-row"><span class="toggle-label">默认模型</span><span style="font-size:11px;color:var(--accent)" id="phModel">-</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="filter-bar" id="filterBar" style="display:none">
+          <div class="search-box"><span class="search-icon">🔍</span><input type="text" id="searchInput" placeholder="搜索题目..." oninput="renderList()" /></div>
+          <select class="filter-select" id="catFilter" onchange="renderList()"><option value="">全部分类</option></select>
+          <select class="filter-select" id="envFilter" onchange="renderList()"><option value="">全部</option><option value="true">需容器</option><option value="false">无容器</option></select>
+          <select class="filter-select" id="solvedFilter" onchange="renderList()"><option value="">全部状态</option><option value="unsolved">未解出</option><option value="solved">已解出</option></select>
+        </div>
+        <div id="challengeList" class="challenge-list"><div class="empty-state"><p style="font-size:14px;margin-bottom:8px">👈 请从左侧选择一个靶场平台</p><p style="font-size:12px;color:var(--text-mute)">选择后自动加载题目列表</p></div></div>
+      </div>
+      <!-- Stats Tab -->
+      <div class="tab-panel" id="tab-stats">
+        <div class="stats-summary" id="statsSummary"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="font-size:13px">每题目 Token 明细</h3>
+          <button class="btn btn-ghost btn-sm" onclick="resetTokenStats()">清空统计</button>
+        </div>
+        <div id="statsTableWrap"></div>
+      </div>
+      <!-- Settings Tab -->
+      <div class="tab-panel" id="tab-settings">
+        <div class="settings-section">
+          <h3>🤖 模型管理</h3>
+          <div class="model-list" id="modelList"></div>
+          <div class="settings-row" style="margin-top:12px">
+            <div class="settings-field"><label>模型名称</label><input type="text" id="newModelName" placeholder="如 gpt-4o" /></div>
+            <div class="settings-field"><label>提供商</label><input type="text" id="newModelProvider" placeholder="如 openai" /></div>
+            <div class="settings-field"><label>Base URL</label><input type="text" id="newModelBaseUrl" placeholder="https://api.openai.com/v1" /></div>
+            <div class="settings-field"><label>API Key 环境变量名</label><input type="text" id="newModelEnv" placeholder="OPENAI_API_KEY" /></div>
+            <button class="btn btn-primary btn-sm" onclick="addModel()">添加模型</button>
+          </div>
+          <div class="env-note">💡 API Key 统一存放在项目根目录 <code>.env</code> 文件中，此处只配置环境变量名，不存储密钥。</div>
+        </div>
+        <div class="settings-section">
+          <h3>🔑 环境变量配置说明</h3>
+          <p style="font-size:12px;color:var(--text-dim);line-height:1.8">
+            所有敏感信息（平台 Access Key、模型 API Key）统一存放在项目根目录的 <code>.env</code> 文件中。<br>
+            全局 <code>config.yaml</code> 存放模型列表和非敏感参数。<br>
+            每个平台的 <code>platforms/&lt;id&gt;/config.yaml</code> 存放平台地址、类型、自动解题开关等非敏感信息。
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Challenge Detail Modal (with solve log) -->
+<div class="modal-overlay" id="detailModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="detailTitle">题目详情</h3>
+      <button class="modal-close" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="modal-body" id="detailBody"></div>
+  </div>
+</div>
+
+<!-- WP Modal -->
+<div class="modal-overlay" id="wpModal"><div class="modal"><div class="modal-head"><h3 id="wpTitle">解题报告</h3><button class="modal-close" onclick="closeWp()">✕</button></div><div class="modal-body"><pre id="wpContent"></pre></div></div></div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+const CONFIG_KEY='ctf_agent_v5';
+let config=loadConfig(),currentPlatform=null,platformConfig=null,challenges=[],envState={},refreshTimer=null,solveLogTimer=null;
+
+function loadConfig(){try{const s=JSON.parse(localStorage.getItem(CONFIG_KEY)||'{}');return{currentPlatform:s.currentPlatform||null,refreshInterval:s.refreshInterval??15,sidebarOpen:s.sidebarOpen!==false,theme:s.theme||'dark'};}catch{return{currentPlatform:null,refreshInterval:15,sidebarOpen:true,theme:'dark'};}}
+function saveConfig(){localStorage.setItem(CONFIG_KEY,JSON.stringify(config));}
+
+// Theme
+function applyTheme(){document.documentElement.setAttribute('data-theme',config.theme);document.getElementById('themeBtn').textContent=config.theme==='dark'?'🌙':'☀️';}
+function toggleTheme(){config.theme=config.theme==='dark'?'light':'dark';applyTheme();saveConfig();}
+
+async function api(path,opts={}){const headers={'Content-Type':'application/json',...(opts.headers||{})};if(currentPlatform)headers['X-Platform-Id']=currentPlatform;const resp=await fetch(`${window.location.origin}${path}`,{headers,...opts});const data=await resp.json().catch(()=>({}));if(!resp.ok)throw new Error(data.detail||data.message||`HTTP ${resp.status}`);return data;}
+
+function toggleSidebar(){const sb=document.getElementById('sidebar');sb.classList.toggle('collapsed');config.sidebarOpen=!sb.classList.contains('collapsed');saveConfig();}
+function switchTab(tab){document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.id===`tab-${tab}`));if(tab==='stats')loadTokenStats();if(tab==='settings')loadModels();}
+
+function toast(msg,type='info'){const wrap=document.getElementById('toastWrap');const el=document.createElement('div');el.className=`toast toast-${type}`;el.textContent=msg;wrap.appendChild(el);setTimeout(()=>{el.style.opacity='0';el.style.transform='translateX(100%)';el.style.transition='.3s';setTimeout(()=>el.remove(),300)},3500);}
+function escapeHtml(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function copyText(t){navigator.clipboard.writeText(t).then(()=>toast('已复制','success'));}
+function setConnStatus(ok){document.getElementById('connDot').className='conn-dot'+(ok?'':' off');document.getElementById('connText').textContent=ok?'已连接':'未连接';}
+function showAddPlatformHint(){toast('在 ctf-platform-skill/ctf_platform_skill/platforms/ 下新建文件夹，放入 skill.py + config.yaml + README.md 即可','info');}
+
+// Platforms
+async function loadPlatforms(){const listEl=document.getElementById('platformList');try{const res=await api('/api/platforms');const platforms=res.data||[];listEl.dataset.platforms=JSON.stringify(platforms);if(!platforms.length){listEl.innerHTML='<div class="empty-state" style="padding:16px;font-size:12px">无可用平台</div>';return;}listEl.innerHTML=platforms.map(p=>`<div class="platform-item ${p.id===currentPlatform?'active':''}" onclick="selectPlatform('${p.id}')"><div class="platform-icon">${p.icon||'📦'}</div><div class="platform-info"><div class="platform-name">${escapeHtml(p.name)}</div><div class="platform-desc">${escapeHtml(p.description||p.type||'')}</div></div></div>`).join('');}catch(e){listEl.innerHTML=`<div class="empty-state" style="padding:16px;font-size:12px;color:var(--red)">加载失败: ${escapeHtml(e.message)}</div>`;}}
+
+async function selectPlatform(id){
+  currentPlatform=id;config.currentPlatform=id;saveConfig();
+  document.querySelectorAll('.platform-item').forEach(el=>el.classList.remove('active'));
+  const item=document.querySelector(`.platform-item[onclick*="${id}"]`);if(item)item.classList.add('active');
+  const platData=(JSON.parse(document.getElementById('platformList').dataset.platforms||'[]')).find(p=>p.id===id)||{};
+  document.getElementById('curPlatIcon').textContent=platData.icon||'📦';
+  document.getElementById('curPlatName').textContent=platData.name||id;
+  // Load platform config
+  try{const res=await api(`/api/platforms/${id}/config`);platformConfig=res.data;renderPlatformHeader(platData);}catch(e){platformConfig=null;toast(`加载平台配置失败: ${e.message}`,'error');}
+  document.getElementById('platformHeader').style.display='block';
+  document.getElementById('filterBar').style.display='flex';
+  loadChallenges();
+  toast(`已切换到: ${platData.name||id}`,'success');
+}
+
+function renderPlatformHeader(platData){
+  document.getElementById('phIcon').textContent=platData.icon||'📦';
+  document.getElementById('phName').textContent=platData.name||currentPlatform;
+  document.getElementById('phDesc').textContent=platData.description||'';
+  document.getElementById('phApiUrl').textContent=(platformConfig?.api_base_url||'')+(platformConfig?.api_path||'');
+  document.getElementById('phType').textContent=platData.type||'-';
+  document.getElementById('phModel').textContent=platformConfig?.llm?.default_model||'-';
+  // Toggles
+  setToggle('tgAutoSolve',!!platformConfig?.auto_solve?.enabled);
+  setToggle('tgAutoDownload',!!platformConfig?.auto_solve?.auto_download);
+  setToggle('tgAutoStart',!!platformConfig?.auto_solve?.auto_start_container);
+}
+function setToggle(id,on){document.getElementById(id).classList.toggle('on',on);}
+
+async function toggleConfig(path,el){
+  if(!platformConfig)return;
+  const parts=path.split('.');let obj=platformConfig;
+  for(let i=0;i<parts.length-1;i++){obj=obj[parts[i]]=obj[parts[i]]||{};}
+  obj[parts[parts.length-1]]=!obj[parts[parts.length-1]];
+  el.classList.toggle('on');
+  try{await api(`/api/platforms/${currentPlatform}/config`,{method:'PUT',body:JSON.stringify({config:platformConfig})});toast('配置已保存','success');}catch(e){toast(`保存失败: ${e.message}`,'error');}
+}
+
+async function batchStartContainers(){
+  if(!currentPlatform)return;
+  toast('正在批量启动容器...','info');
+  try{const res=await api(`/api/platforms/${currentPlatform}/start-unsolved-containers`,{method:'POST'});const d=res.data;toast(`已启动 ${d.started}/${d.total} 个容器`,'success');loadChallenges();}catch(e){toast(`批量启动失败: ${e.message}`,'error');}
+}
+
+// Challenges
+async function loadChallenges(){
+  if(!currentPlatform){document.getElementById('challengeList').innerHTML='<div class="empty-state"><p style="font-size:14px;margin-bottom:8px">👈 请从左侧选择一个靶场平台</p></div>';return;}
+  const listEl=document.getElementById('challengeList');
+  listEl.innerHTML='<div class="loading-state"><div class="spinner"></div><p style="margin-top:10px">加载题目中...</p></div>';
+  setConnStatus(false);
+  try{
+    const res=await api('/api/challenges?light=false');
+    challenges=res.data||[];
+    challenges.forEach(c=>{if(c.need_container&&!envState[c.id])envState[c.id]={status:c.container_status||'not_started',connection_info:c.connection_info||'',loading:false};});
+    populateCategories();renderList();setConnStatus(true);
+    toast(`加载成功，共 ${challenges.length} 道题目`,'success');
+  }catch(e){
+    listEl.innerHTML=`<div class="empty-state"><p style="font-size:14px;margin-bottom:6px">⚠ 无法连接平台</p><p style="font-size:12px;color:var(--text-mute);margin-bottom:12px">${escapeHtml(e.message)}</p><button class="btn btn-primary btn-sm" onclick="loadChallenges()">重试</button></div>`;
+    setConnStatus(false);toast(`连接失败: ${e.message}`,'error');
+  }
+}
+
+function populateCategories(){const sel=document.getElementById('catFilter');const cats=[...new Set(challenges.map(c=>c.category).filter(Boolean))];const cur=sel.value;sel.innerHTML='<option value="">全部分类</option>'+cats.map(c=>`<option value="${c}">${escapeHtml(c)}</option>`).join('');sel.value=cur;}
+
+function renderList(){
+  const listEl=document.getElementById('challengeList');
+  const search=document.getElementById('searchInput').value.toLowerCase();
+  const cat=document.getElementById('catFilter').value;
+  const envF=document.getElementById('envFilter').value;
+  const solF=document.getElementById('solvedFilter').value;
+  let filtered=challenges.filter(c=>{
+    if(search&&!c.name.toLowerCase().includes(search))return false;
+    if(cat&&c.category!==cat)return false;
+    if(envF==='true'&&!c.need_container)return false;
+    if(envF==='false'&&c.need_container)return false;
+    if(solF==='solved'&&!c.solved)return false;
+    if(solF==='unsolved'&&c.solved)return false;
+    return true;
+  });
+  if(!filtered.length){listEl.innerHTML='<div class="empty-state">没有符合条件的题目</div>';return;}
+  listEl.innerHTML=filtered.map(c=>renderCard(c)).join('');
+}
+
+function renderCard(c){
+  const es=envState[c.id]||{status:'not_started',connection_info:'',loading:false};
+  const statusText={not_started:'未启动',starting:'启动中',running:'运行中',stopped:'已停止',failed:'失败'}[es.status]||es.status;
+  const canStart=!es.loading&&es.status!=='running'&&es.status!=='starting';
+  const canStop=!es.loading&&(es.status==='running'||es.status==='starting');
+  let envSection='';
+  if(c.need_container){
+    envSection=`<div class="env-section"><span class="env-status env-${es.status}"><span class="dot ${es.status==='starting'||es.loading?'pulse':''}"></span>${statusText}</span>${es.connection_info?`<span class="env-url" onclick="copyText('${es.connection_info}')">${escapeHtml(es.connection_info)}</span>`:''}<button class="btn btn-green btn-sm" ${canStart?'':'disabled'} onclick="startEnv('${c.id}')">${es.status==='starting'?'启动中...':'开启'}</button><button class="btn btn-red btn-sm" ${canStop?'':'disabled'} onclick="stopEnv('${c.id}')">关闭</button><button class="btn btn-ghost btn-sm" onclick="refreshEnv('${c.id}')">刷新</button></div>`;
+  }
+  return `<div class="ch-card" id="card-${c.id}">
+    <div class="ch-row">
+      <span class="ch-id">#${c.id}</span>
+      <span class="ch-name" onclick="openDetail('${c.id}')">${escapeHtml(c.name)}</span>
+      <div class="ch-meta">
+        ${c.category?`<span class="badge badge-cat">${escapeHtml(c.category)}</span>`:''}
+        ${c.value>0?`<span class="badge badge-val">${c.value}分</span>`:''}
+        ${c.solved?'<span class="badge badge-solved">✓已解</span>':'<span class="badge badge-unsolved">未解</span>'}
+        ${c.need_container?'<span class="badge badge-need-env">需容器</span>':'<span class="badge badge-no-env">无容器</span>'}
+      </div>
+      <div class="ch-actions">
+        <button class="btn btn-purple btn-sm" onclick="openDetail('${c.id}')">解题</button>
+        <button class="btn btn-primary btn-sm" onclick="downloadChallenge('${c.id}')">下载</button>
+      </div>
+    </div>
+    ${envSection}
+  </div>`;
+}
+
+// Challenge detail with solve log
+async function openDetail(id){
+  const ch=challenges.find(c=>c.id===id);if(!ch)return;
+  document.getElementById('detailTitle').textContent=`#${ch.id} ${ch.name}`;
+  document.getElementById('detailModal').classList.add('open');
+  document.getElementById('detailBody').innerHTML='<div class="loading-state"><div class="spinner"></div></div>';
+  try{
+    const res=await api(`/api/challenges/${id}`);const d=res.data;
+    const logRes=await api(`/api/solve-log/${currentPlatform}/${id}`);
+    const log=logRes.data||{logs:[],status:'idle'};
+    renderDetailBody(d,log);
+    startSolveLogPolling(id);
+  }catch(e){document.getElementById('detailBody').innerHTML=`<p style="color:var(--red)">加载失败: ${escapeHtml(e.message)}</p>`;}
+}
+
+function renderDetailBody(d,log){
+  const statusClass=log.status||'idle';
+  const statusText={idle:'待解题',running:'解题中',success:'解题成功',failed:'解题失败'}[statusClass]||statusClass;
+  const logsHtml=(log.logs||[]).map(l=>`<div class="terminal-line"><span class="terminal-time">${l.timestamp}</span><span class="terminal-type ${l.type}">${l.type}</span><span class="terminal-content">${escapeHtml(l.content)}</span></div>`).join('')||'<div class="terminal-line"><span class="terminal-content" style="color:#6c7086">暂无解题日志</span></div>';
+  const filesHtml=(d.files&&d.files.length)?d.files.map(f=>`<span class="env-url" onclick="downloadFile('${d.id}','${escapeAttr(f.name)}')">📎 ${escapeHtml(f.name)}</span>`).join(' '):'<span style="font-size:11px;color:var(--text-mute)">无附件</span>';
+  document.getElementById('detailBody').innerHTML=`
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+      <span class="solve-status ${statusClass}">${statusText}</span>
+      <span class="badge badge-cat">${escapeHtml(d.category||'未分类')}</span>
+      ${d.value>0?`<span class="badge badge-val">${d.value}分</span>`:''}
+      ${d.need_container?'<span class="badge badge-need-env">需容器</span>':''}
+      <div style="flex:1"></div>
+      <button class="btn btn-purple btn-sm" onclick="triggerSolve('${d.id}')">🤖 开始解题</button>
+      <button class="btn btn-ghost btn-sm" onclick="clearSolveLog('${d.id}')">清空日志</button>
+    </div>
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;color:var(--text-mute);margin-bottom:6px">题目描述</div>
+      <div style="font-size:12px;color:var(--text-dim);line-height:1.7;white-space:pre-wrap;background:var(--bg);padding:12px;border-radius:var(--radius-sm)">${escapeHtml(d.description||'（无描述）')}</div>
+    </div>
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;color:var(--text-mute);margin-bottom:6px">附件</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${filesHtml}</div>
+    </div>
+    ${d.connection_info?`<div style="margin-bottom:14px"><div style="font-size:11px;color:var(--text-mute);margin-bottom:6px">容器地址</div><span class="env-url" onclick="copyText('${d.connection_info}')">${escapeHtml(d.connection_info)}</span></div>`:''}
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;color:var(--text-mute);margin-bottom:6px">Flag 提交</div>
+      <div style="display:flex;gap:6px"><input class="settings-field" style="flex:1" type="text" id="flagInput" placeholder="输入 Flag..." onkeydown="if(event.key==='Enter')submitFlag('${d.id}')" /><button class="btn btn-primary btn-sm" onclick="submitFlag('${d.id}')">提交</button></div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:var(--text-mute);margin-bottom:6px">解题实时日志</div>
+      <div class="terminal" id="solveTerminal">${logsHtml}</div>
+    </div>
+  `;
+  const term=document.getElementById('solveTerminal');if(term)term.scrollTop=term.scrollHeight;
+}
+
+function startSolveLogPolling(id){if(solveLogTimer)clearInterval(solveLogTimer);solveLogTimer=setInterval(async()=>{try{const res=await api(`/api/solve-log/${currentPlatform}/${id}`);const log=res.data||{logs:[]};const term=document.getElementById('solveTerminal');if(term&&log.logs){term.innerHTML=log.logs.map(l=>`<div class="terminal-line"><span class="terminal-time">${l.timestamp}</span><span class="terminal-type ${l.type}">${l.type}</span><span class="terminal-content">${escapeHtml(l.content)}</span></div>`).join('');term.scrollTop=term.scrollHeight;}}catch{}},3000);}
+function closeDetail(){document.getElementById('detailModal').classList.remove('open');if(solveLogTimer){clearInterval(solveLogTimer);solveLogTimer=null;}}
+
+async function triggerSolve(id){
+  try{await api(`/api/solve/${currentPlatform}/${id}`,{method:'POST',body:JSON.stringify({challenge_id:id})});toast('解题任务已启动','success');}catch(e){toast(`启动失败: ${e.message}`,'error');}
+}
+async function clearSolveLog(id){try{await api(`/api/solve-log/${currentPlatform}/${id}`,{method:'DELETE'});toast('日志已清空','success');openDetail(id);}catch(e){toast(`清空失败: ${e.message}`,'error');}}
+
+// Container ops
+async function startEnv(id){const es=envState[id];if(!es)return;es.loading=true;es.status='starting';renderList();try{const res=await api(`/api/containers/${id}/start`,{method:'POST'});es.status=res.data.status||'running';es.connection_info=res.data.connection_info||'';es.loading=false;renderList();toast(es.connection_info?`容器已启动: ${es.connection_info}`:'容器已启动','success');}catch(e){es.status='failed';es.loading=false;renderList();toast(`启动失败: ${e.message}`,'error');}}
+async function stopEnv(id){const es=envState[id];if(!es)return;es.loading=true;renderList();try{await api(`/api/containers/${id}/stop`,{method:'POST'});es.status='stopped';es.connection_info='';es.loading=false;renderList();toast('容器已关闭','success');}catch(e){es.status='failed';es.loading=false;renderList();toast(`关闭失败: ${e.message}`,'error');}}
+async function refreshEnv(id){const es=envState[id];if(!es)return;try{const res=await api(`/api/containers/${id}`);es.status=res.data.status||'not_started';es.connection_info=res.data.connection_info||'';renderList();}catch(e){toast(`刷新失败: ${e.message}`,'error');}}
+
+// Download
+async function downloadChallenge(id){try{const res=await api(`/api/challenges/${id}`);const files=res.data.files||[];if(!files.length){toast('无附件','info');return;}await downloadFile(id,files[0].name);}catch(e){toast(`下载失败: ${e.message}`,'error');}}
+async function downloadFile(id,filename){try{const headers={};if(currentPlatform)headers['X-Platform-Id']=currentPlatform;const resp=await fetch(`${window.location.origin}/api/challenges/${id}/download?filename=${encodeURIComponent(filename)}`,{headers});if(!resp.ok)throw new Error(`HTTP ${resp.status}`);const blob=await resp.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);toast(`已下载: ${filename}`,'success');}catch(e){toast(`下载失败: ${e.message}`,'error');}}
+
+// Flag submit
+async function submitFlag(id){const input=document.getElementById('flagInput');const flag=input?input.value.trim():'';if(!flag){toast('请输入 Flag','error');return;}try{const res=await api(`/api/challenges/${id}/submit`,{method:'POST',body:JSON.stringify({challenge_id:id,flag})});const d=res.data;if(d.is_correct){toast('🎉 Flag 正确！','success');const ch=challenges.find(c=>c.id===id);if(ch)ch.solved=true;renderList();if(d.writeup&&d.writeup.success)showWp(d.writeup.title||'解题报告',d.writeup.content);}else{toast('❌ Flag 错误','error');}}catch(e){toast(`提交失败: ${e.message}`,'error');}}
+
+function escapeAttr(s){return s.replace(/'/g,"\\'").replace(/"/g,'&quot;');}
+function showWp(title,content){document.getElementById('wpTitle').textContent=title;document.getElementById('wpContent').textContent=content||'（无内容）';document.getElementById('wpModal').classList.add('open');}
+function closeWp(){document.getElementById('wpModal').classList.remove('open');}
+document.getElementById('wpModal').addEventListener('click',e=>{if(e.target.id==='wpModal')closeWp();});
+document.getElementById('detailModal').addEventListener('click',e=>{if(e.target.id==='detailModal')closeDetail();});
+
+// Token stats
+async function loadTokenStats(){
+  try{
+    const res=await api(`/api/token-stats?platform_id=${currentPlatform||''}`);
+    const d=res.data;const t=d.total||{};
+    document.getElementById('statsSummary').innerHTML=`
+      <div class="stat-card"><div class="stat-card-label">总 Token</div><div class="stat-card-value accent">${t.total_tokens||0}</div></div>
+      <div class="stat-card"><div class="stat-card-label">Prompt Token</div><div class="stat-card-value blue">${t.prompt_tokens||0}</div></div>
+      <div class="stat-card"><div class="stat-card-label">Completion Token</div><div class="stat-card-value">${t.completion_tokens||0}</div></div>
+      <div class="stat-card"><div class="stat-card-label">调用次数</div><div class="stat-card-value">${t.calls||0}</div></div>
+      <div class="stat-card"><div class="stat-card-label">命中</div><div class="stat-card-value green">${t.hit||0}</div></div>
+      <div class="stat-card"><div class="stat-card-label">未命中</div><div class="stat-card-value red">${t.miss||0}</div></div>
+    `;
+    const chs=d.challenges||[];
+    if(!chs.length){document.getElementById('statsTableWrap').innerHTML='<div class="empty-state">暂无 Token 使用记录</div>';return;}
+    document.getElementById('statsTableWrap').innerHTML=`<table class="stats-table"><thead><tr><th>平台</th><th>题目ID</th><th>模型</th><th>调用</th><th>Token</th><th>命中</th><th>未命中</th></tr></thead><tbody>${chs.map(c=>`<tr><td>${escapeHtml(c.platform_id)}</td><td>#${escapeHtml(c.challenge_id)}</td><td>${escapeHtml(c.model||'-')}</td><td>${c.calls||0}</td><td>${c.total_tokens||0}</td><td class="hit-badge">${c.hit||0}</td><td class="miss-badge">${c.miss||0}</td></tr>`).join('')}</tbody></table>`;
+  }catch(e){document.getElementById('statsSummary').innerHTML='';document.getElementById('statsTableWrap').innerHTML=`<div class="empty-state" style="color:var(--red)">加载失败: ${escapeHtml(e.message)}</div>`;}
+}
+async function resetTokenStats(){try{await api('/api/token-stats',{method:'DELETE'});toast('统计已清空','success');loadTokenStats();}catch(e){toast(`清空失败: ${e.message}`,'error');}}
+
+// Models
+async function loadModels(){
+  try{
+    const res=await api('/api/models');
+    const models=res.data||[];
+    document.getElementById('modelList').innerHTML=models.map(m=>`<div class="model-item"><div class="model-item-info"><div class="model-item-name">${escapeHtml(m.name)}</div><div class="model-item-meta">${escapeHtml(m.provider||'custom')} · ${escapeHtml(m.base_url||'')} · Key: ${escapeHtml(m.api_key_env||'-')}</div></div><button class="btn btn-red btn-sm" onclick="deleteModel('${escapeAttr(m.name)}')">删除</button></div>`).join('')||'<div style="font-size:12px;color:var(--text-mute)">暂无模型</div>';
+  }catch(e){document.getElementById('modelList').innerHTML=`<div style="color:var(--red);font-size:12px">加载失败: ${escapeHtml(e.message)}</div>`;}
+}
+async function addModel(){
+  const name=document.getElementById('newModelName').value.trim();
+  const provider=document.getElementById('newModelProvider').value.trim()||'custom';
+  const base_url=document.getElementById('newModelBaseUrl').value.trim();
+  const api_key_env=document.getElementById('newModelEnv').value.trim();
+  if(!name||!base_url){toast('模型名称和 Base URL 必填','error');return;}
+  try{await api('/api/models',{method:'POST',body:JSON.stringify({name,provider,base_url,api_key_env})});toast(`模型 ${name} 已添加`,'success');document.getElementById('newModelName').value='';document.getElementById('newModelProvider').value='';document.getElementById('newModelBaseUrl').value='';document.getElementById('newModelEnv').value='';loadModels();}catch(e){toast(`添加失败: ${e.message}`,'error');}
+}
+async function deleteModel(name){try{await api(`/models/${encodeURIComponent(name)}`,{method:'DELETE'});toast(`模型 ${name} 已删除`,'success');loadModels();}catch(e){toast(`删除失败: ${e.message}`,'error');}}
+
+// Auto refresh
+function setupAutoRefresh(){if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null;}if(config.refreshInterval>0){refreshTimer=setInterval(()=>{const ids=Object.keys(envState).filter(id=>{const s=envState[id];return s&&(s.status==='starting'||s.status==='running');});for(const id of ids){refreshEnv(id);}},config.refreshInterval*1000);}}
+
+// Init
+(async function init(){
+  applyTheme();
+  if(!config.sidebarOpen)document.getElementById('sidebar').classList.add('collapsed');
+  await loadPlatforms();
+  if(config.currentPlatform){
+    currentPlatform=config.currentPlatform;
+    const platData=(JSON.parse(document.getElementById('platformList').dataset.platforms||'[]')).find(p=>p.id===config.currentPlatform)||{};
+    document.getElementById('curPlatIcon').textContent=platData.icon||'📦';
+    document.getElementById('curPlatName').textContent=platData.name||config.currentPlatform;
+    document.querySelectorAll('.platform-item').forEach(el=>{if(el.getAttribute('onclick')&&el.getAttribute('onclick').includes(config.currentPlatform))el.classList.add('active');});
+    selectPlatform(config.currentPlatform);
+  }
+  setupAutoRefresh();
+})();
+</script>
+</body>
+</html>

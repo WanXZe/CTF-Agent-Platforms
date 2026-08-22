@@ -1,0 +1,80 @@
+# ============================================================
+# CTF-Agent 主配置文件（config.yaml）
+# 非敏感结构配置，可提交 git
+# 所有 API Key / Token / 密钥请放在 .env 文件
+# ============================================================
+
+# ========== 靶场平台（非敏感：地址、类型、路径）==========
+platform:
+  type: "slab"                              # slab | ctfd | gzctf | ctf2 | generic
+  api_base_url: "https://pro.dasctf.com"    # 靶场平台根地址
+  api_path: "/slab-match/api/v1/agent"      # API 路径前缀
+  access_key_env: "SLAB_ACCESS_KEY"         # AccessKey 对应的环境变量名
+
+# ========== LLM 模型列表（非敏感：模型名、地址、参数；Key 在 .env）==========
+llm:
+  default_model: "qwen-plus"
+  temperature: 0.7
+  max_tokens: 4096
+  timeout: 120
+  # 可用模型列表（前端可切换/增删）
+  models:
+    - name: "qwen-plus"
+      provider: "bailian"
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      api_key_env: "BAILIAN_API_KEY"
+    - name: "deepseek-chat"
+      provider: "deepseek"
+      base_url: "https://api.deepseek.com"
+      api_key_env: "DEEPSEEK_API_KEY"
+    - name: "gpt-4o"
+      provider: "openai"
+      base_url: "https://api.openai.com/v1"
+      api_key_env: "OPENAI_API_KEY"
+  # 平台 LLM 网关代理地址（非敏感，Key 在 .env）
+  gateway_base_url: ""
+  gateway_bailian_base_url: ""
+
+# ========== 求解器 ==========
+solver:
+  max_concurrent_challenges: 2
+  max_attempts_per_challenge: 3
+  models: ""                                 # 逗号分隔模型规格，留空=自动检测
+  coordinator: "auto"                        # auto | claude | codex | pydantic
+  coordinator_model: ""                      # pydantic 后端使用的模型
+
+# ========== 容器（靶机环境）==========
+container:
+  default_timeout: 120                       # 容器启动超时（秒）
+  poll_interval: 3.0                         # 容器启动轮询间隔（秒）
+  auto_recover: true                         # 解题完成后自动回收容器
+
+# ========== Flag ==========
+flag:
+  pattern: ""                                # 自定义正则，空=不校验
+  min_length: 1
+  max_submit: 50                             # 每题最大提交次数
+
+# ========== 速率限制 ==========
+rate_limit:
+  enabled: true
+  requests_per_second: 3
+  burst_size: 10
+
+# ========== 沙箱 ==========
+sandbox:
+  docker_url: "unix:///var/run/docker.sock"
+  image: "ctf-sandbox"
+  memory_limit: "16g"
+  cpu_limit: 2
+
+# ========== Web ==========
+web:
+  host: "0.0.0.0"                            # 0.0.0.0 允许内网访问
+  port: 12346
+  cors_origins:
+    - "*"                                    # 内网部署可设为具体域名
+
+# ========== 日志 ==========
+logging:
+  level: "INFO"                              # DEBUG | INFO | WARNING | ERROR

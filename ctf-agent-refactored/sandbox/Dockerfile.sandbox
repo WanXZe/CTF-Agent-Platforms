@@ -1,0 +1,63 @@
+FROM ubuntu:22.04
+
+# 关闭交互
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ make cmake \
+    libgmp-dev libmpfr-dev libmpc-dev libfplll-dev libeigen3-dev libhwloc-dev libbz2-dev \
+    python3 python3-pip python3-dev \
+    git wget curl unzip tar file binutils \
+    libssl-dev libffi-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt
+
+# ------------------------------
+# 导入所有预编译工具包 local-src
+# ------------------------------
+COPY local-src/cado-nfs.tar.gz /opt/cado-nfs.tar.gz
+COPY local-src/flatter.tar.gz /opt/flatter.tar.gz
+COPY local-src/radare2.tar.gz /opt/radare2.tar.gz
+COPY local-src/RsaCtfTool.tar.gz /opt/RsaCtfTool.tar.gz
+COPY local-src/stegseek.tar.gz /opt/stegseek.tar.gz
+
+# cado‑nfs 预编译包解压，直接解压到根，tar内部路径是 /opt/cado-nfs
+RUN tar -xf /opt/cado-nfs.tar.gz -C / \
+    && rm -f /opt/cado-nfs.tar.gz
+
+# cado‑nfs 全局包装脚本
+RUN printf '#!/bin/bash\n\
+BUILD_PARENT=/opt/cado-nfs/build\n\
+H=$(hostname)\n\
+if [ ! -d "$BUILD_PARENT/$H" ]; then\n\
+  src=$(ls -d "$BUILD_PARENT"/* 2>/dev/null | head -1)\n\
+  if [ -n "$src" ]; then ln -s "$src" "$BUILD_PARENT/$H"; fi\n\
+fi\n\
+exec python3 /opt/cado-nfs/cado-nfs.py "$@"\n' > /usr/local/bin/cado-nfs \
+&& chmod +x /usr/local/bin/cado-nfs
+
+# flatter
+RUN tar -xf /opt/flatter.tar.gz -C /opt \
+    && rm -f /opt/flatter.tar.gz
+
+# radare2
+RUN tar -xf /opt/radare2.tar.gz -C /opt \
+    && rm -f /opt/radare2.tar.gz
+
+# RsaCtfTool
+RUN tar -xf /opt/RsaCtfTool.tar.gz -C /opt \
+    && rm -f /opt/RsaCtfTool.tar.gz
+
+# stegseek
+RUN tar -xf /opt/stegseek.tar.gz -C /opt \
+    && rm -f /opt/stegseek.tar.gz
+
+# 把工具目录加入PATH（按需）
+ENV PATH="/opt/flatter:/opt/radare2/bin:/opt/stegseek:${PATH}"
+
+WORKDIR /workspace
+VOLUME ["/workspace"]
+
+CMD ["/bin/bash"]
