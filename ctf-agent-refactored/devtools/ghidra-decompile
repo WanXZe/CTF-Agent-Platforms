@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Export Ghidra C pseudocode: ghidra-decompile INPUT [OUTPUT.c]."""
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+if len(sys.argv) not in (2, 3):
+    print(__doc__, file=sys.stderr)
+    sys.exit(2)
+binary = Path(sys.argv[1]).resolve(strict=True)
+output = Path(sys.argv[2]).resolve() if len(sys.argv) == 3 else binary.with_name(binary.name + ".c")
+if output == binary:
+    sys.exit("Output must differ from the input binary")
+output.parent.mkdir(parents=True, exist_ok=True)
+with tempfile.TemporaryDirectory(prefix="ghidra-") as project:
+    result = subprocess.run([
+        os.environ.get("GHIDRA_HOME", "/opt/ghidra") + "/support/analyzeHeadless",
+        project, "ctf", "-import", str(binary), "-analysisTimeoutPerFile", "180",
+        "-max-cpu", "2", "-scriptPath", "/opt/ctf-tools/ghidra-scripts",
+        "-postScript", "DecompileToC.java", str(output), "-deleteProject",
+    ])
+    if result.returncode:
+        sys.exit(result.returncode)
+    if not output.is_file() or output.stat().st_size == 0:
+        sys.exit("Ghidra did not produce pseudocode; inspect the analysis log")
+print(str(output))

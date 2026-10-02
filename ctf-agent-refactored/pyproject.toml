@@ -7,7 +7,7 @@ name = "ctf-agent"
 version = "2.0.0"
 description = "CTF 智能体解题平台（重构版）—— 分层架构 + Skill 插件 + 容器控制"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "AGPL-3.0"}
 dependencies = [
     "fastapi>=0.110",

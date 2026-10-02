@@ -21,6 +21,10 @@ class ChallengeListItem(BaseModel):
     need_container: bool = False
     container_status: str = "not_started"
     tags: list[str] = Field(default_factory=list)
+    default_model: str = ''
+    configured_default_model: Optional[str] = None
+    model_source: str = 'global'
+    model_category: str = ''
 
 
 class ChallengeDetail(ChallengeListItem):

@@ -4,15 +4,21 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+import re
+import shutil
+from pathlib import Path
+from typing import Any, Optional, Literal
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from config import Settings
 from core.skills import PlatformSkillAdapter
 from core.stats import token_stats, solve_log
-from web.deps import get_platform_adapter
+from web.deps import get_platform_adapter, get_platform_id
+from core.agent import model_config
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +26,56 @@ router = APIRouter(prefix="/api", tags=["platform"])
 
 
 # ── 平台配置 ──
+
+class PlatformCreate(BaseModel):
+    id: str
+    name: str
+    api_base_url: str
+    access_key_env: str = "CTFD_TOKEN"
+
+
+@router.post("/platforms")
+async def create_platform(body: PlatformCreate) -> dict:
+    """Register a CTFd instance from the bundled adapter template."""
+    from ctf_platform_skill.registry import PLATFORMS_DIR, PlatformRegistry
+    platform_id = body.id.strip().lower()
+    url = body.api_base_url.strip().rstrip("/")
+    parsed = urlparse(url)
+    if not re.fullmatch(r"[a-z][a-z0-9-]{1,31}", platform_id):
+        raise HTTPException(400, "平台 ID 只能使用 2-32 位小写字母、数字和连字符")
+    if not body.name.strip() or len(body.name) > 80:
+        raise HTTPException(400, "平台名称不能为空且不能超过 80 字")
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.password:
+        raise HTTPException(400, "请输入有效的 HTTP(S) 平台地址")
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", body.access_key_env):
+        raise HTTPException(400, "密钥环境变量名格式无效")
+    registry = PlatformRegistry.get_instance()
+    folder = PLATFORMS_DIR / platform_id
+    if folder.exists() or registry.get(platform_id):
+        raise HTTPException(409, "平台 ID 已存在")
+    template = PLATFORMS_DIR / "ctfd" / "skill.py"
+    if not template.is_file():
+        raise HTTPException(500, "CTFd 模板不存在")
+    import yaml
+    try:
+        folder.mkdir()
+        shutil.copyfile(template, folder / "skill.py")
+        config = {
+            "api_base_url": url, "api_path": "/api/v1",
+            "access_key_env": body.access_key_env, "timeout": 30,
+            "meta": {"name": body.name.strip(), "icon": "🏁", "description": url, "type": "ctfd"},
+            "auto_solve": {"enabled": False, "auto_download": True,
+                           "auto_start_container": False, "batch_start_unsolved": False},
+        }
+        (folder / "config.yaml").write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        registry.reload()
+        if registry.get(platform_id) is None:
+            raise RuntimeError("平台加载失败")
+    except Exception as exc:
+        shutil.rmtree(folder, ignore_errors=True)
+        registry.reload()
+        raise HTTPException(500, f"平台注册失败: {exc}") from exc
+    return {"success": True, "data": {"id": platform_id, "name": body.name.strip(), "access_key_env": body.access_key_env}}
 
 @router.get("/platforms/{platform_id}/config")
 async def get_platform_config(platform_id: str) -> dict:
@@ -55,17 +111,7 @@ async def update_platform_config(platform_id: str, body: PlatformConfigUpdate) -
 async def list_models() -> dict:
     """列出全局 config.yaml 中配置的所有模型。"""
     settings = Settings()
-    models = []
-    try:
-        import yaml
-        from pathlib import Path
-        cfg_path = Path("config.yaml")
-        if cfg_path.exists():
-            with open(cfg_path, encoding="utf-8") as f:
-                cfg = yaml.safe_load(f) or {}
-            models = cfg.get("llm", {}).get("models", [])
-    except Exception as e:
-        logger.warning("读取模型列表失败: %s", e)
+    models = model_config.list_models()
     return {"success": True, "data": models, "default": settings.llm_default_model}
 
 
@@ -79,36 +125,53 @@ class ModelCreate(BaseModel):
 @router.post("/models")
 async def add_model(body: ModelCreate) -> dict:
     """新增模型到全局 config.yaml。"""
-    import yaml
-    from pathlib import Path
-    cfg_path = Path("config.yaml")
-    if not cfg_path.exists():
-        raise HTTPException(status_code=500, detail="config.yaml 不存在")
-    with open(cfg_path, encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
-    models = cfg.setdefault("llm", {}).setdefault("models", [])
-    if any(m.get("name") == body.name for m in models):
-        raise HTTPException(status_code=400, detail=f"模型 {body.name} 已存在")
-    models.append({"name": body.name, "provider": body.provider, "base_url": body.base_url, "api_key_env": body.api_key_env})
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-    return {"success": True, "message": f"模型 {body.name} 已添加"}
+    try:
+        item = model_config.save_model(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"success": True, "data": item, "message": "模型已添加"}
 
 
-@router.delete("/models/{model_name}")
+@router.put('/models/{model_name:path}')
+async def update_model(model_name: str, body: ModelCreate) -> dict:
+    try:
+        item = model_config.save_model(body.model_dump(), original_name=model_name)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {'success': True, 'data': item, 'message': '模型已修改'}
+
+
+class CategoryModelUpdate(BaseModel):
+    model: Optional[str] = None
+
+
+@router.get('/category-models')
+async def list_category_models(adapter: PlatformSkillAdapter = Depends(get_platform_adapter)):
+    challenges = await adapter.list_challenges(light=True)
+    return {'success': True, 'data': model_config.list_category_defaults([c.category for c in challenges]),
+            'default': Settings().llm_default_model}
+
+
+@router.put('/category-models/{category:path}')
+async def update_category_model(category: str, body: CategoryModelUpdate):
+    try:
+        data = model_config.set_category_default(category, body.model)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {'success': True, 'data': {'category': model_config.category_name(category), **data}, 'message': '方向默认模型已保存'}
+
+
+@router.delete("/models/{model_name:path}")
 async def delete_model(model_name: str) -> dict:
     """从全局 config.yaml 删除模型。"""
-    import yaml
-    from pathlib import Path
-    cfg_path = Path("config.yaml")
-    if not cfg_path.exists():
-        raise HTTPException(status_code=500, detail="config.yaml 不存在")
-    with open(cfg_path, encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
-    models = cfg.get("llm", {}).get("models", [])
-    cfg["llm"]["models"] = [m for m in models if m.get("name") != model_name]
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    try:
+        model_config.delete_model(model_name)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     return {"success": True, "message": f"模型 {model_name} 已删除"}
 
 
@@ -138,17 +201,30 @@ async def reset_token_stats() -> dict:
 # ── 解题日志 ──
 
 @router.get("/solve-log/{platform_id}/{challenge_id}")
-async def get_solve_log(platform_id: str, challenge_id: str) -> dict:
+async def get_solve_log(platform_id: str, challenge_id: str,
+                        limit: int = Query(default=200, ge=1, le=2000),
+                        kind: Literal['solve', 'agent'] = Query(default='solve')) -> dict:
     """获取单题解题实时日志。"""
-    log = solve_log.get_solve_log(platform_id, challenge_id)
+    getter = solve_log.get_agent_log if kind == 'agent' else solve_log.get_solve_log
+    log = getter(platform_id, challenge_id, limit=limit)
     return {"success": True, "data": log}
+
+
+@router.get('/solve-log/{platform_id}/{challenge_id}/download')
+async def download_solve_log(platform_id: str, challenge_id: str,
+                             kind: Literal['solve', 'agent'] = Query(default='solve')):
+    return StreamingResponse(solve_log.iter_journal(platform_id, challenge_id, kind),
+        media_type='application/x-ndjson', headers={'Content-Disposition': f'attachment; filename="{kind}-log.jsonl"'})
 
 
 @router.delete("/solve-log/{platform_id}/{challenge_id}")
 async def clear_solve_log(platform_id: str, challenge_id: str) -> dict:
     """清空单题解题日志。"""
+    from core.agent.solve_runner import is_running
+    if is_running(platform_id, challenge_id):
+        raise HTTPException(status_code=409, detail="请先取消解题，待清理完成后再清空日志")
     solve_log.clear_solve_log(platform_id, challenge_id)
-    return {"success": True, "message": "日志已清空"}
+    return {"success": True, "message": "显示已清空，完整日志保留"}
 
 
 @router.get("/solve-sessions")
@@ -188,12 +264,66 @@ class SolveRequest(BaseModel):
     model: Optional[str] = None
 
 
+@router.post("/models/check")
+async def check_model(body: SolveRequest, request: Request) -> dict:
+    from core.agent.solve_runner import selected_settings
+    from core.agent.local_llm import LocalModel
+    try:
+        selected = body.model
+        if not selected:
+            from web.deps import get_adapter_by_id
+            challenge = await get_adapter_by_id(get_platform_id(request)).get_challenge(body.challenge_id)
+            selected = model_config.category_defaults(challenge.category)['default_model']
+        model = LocalModel(selected_settings(selected))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        return {"success": True, "data": await model.probe()}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await model.aclose()
+
+
+@router.post("/solve/{platform_id}/{challenge_id}/{operation}")
+async def control_task(platform_id: str, challenge_id: str, operation: str) -> dict:
+    from core.agent.solve_runner import control_solve
+    if operation not in ("pause", "resume", "cancel"):
+        raise HTTPException(status_code=400, detail="操作须为 pause、resume 或 cancel")
+    try:
+        status = control_solve(platform_id, challenge_id, operation)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "data": {"status": status}}
+
+
 @router.post("/solve/{platform_id}/{challenge_id}")
 async def trigger_solve(platform_id: str, challenge_id: str, body: SolveRequest) -> dict:
-    """触发 Agent 解题（异步，前端通过 solve-log 轮询进度）。"""
-    solve_log.set_solve_status(platform_id, challenge_id, "running")
-    solve_log.append_log(platform_id, challenge_id, "system", f"开始解题，模型: {body.model or 'default'}")
-    # 记录初始 token 调用（模拟）
-    token_stats.record_token_usage(platform_id, challenge_id, prompt_tokens=100, completion_tokens=50, is_hit=False, model=body.model or "default")
-    solve_log.append_log(platform_id, challenge_id, "think", "分析题目描述和附件...")
-    return {"success": True, "message": "解题任务已启动，通过 /api/solve-log 轮询进度"}
+    """触发 Agent 真实解题（后台任务，前端通过 solve-log 轮询进度）。"""
+    from core.agent.solve_runner import is_running, start_solve
+    from web.deps import get_adapter_by_id
+
+    try:
+        adapter = get_adapter_by_id(platform_id)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"未知平台 {platform_id}: {exc}") from exc
+    if is_running(platform_id, challenge_id):
+        return {"success": True, "data": {"started": False}, "message": "该题正在解题中"}
+    try:
+        started = start_solve(platform_id, challenge_id, adapter, model=body.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "data": {"started": started},
+            "message": "解题任务已启动，通过 /api/solve-log 轮询进度" if started else "该题正在解题中"}
+
+
+@router.get("/local/info")
+async def local_info() -> dict:
+    """本地题库概况（根目录 / 题目数 / 分类）。"""
+    from web.deps import get_adapter_by_id
+
+    try:
+        adapter = get_adapter_by_id("local")
+        return {"success": True, "data": adapter.describe()}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"本地题库不可用: {exc}") from exc

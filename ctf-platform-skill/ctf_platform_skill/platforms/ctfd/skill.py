@@ -20,6 +20,18 @@ import yaml
 _CONFIG_PATH = Path(__file__).parent / "config.yaml"
 
 
+def _secret(name: str) -> str:
+    env_path = Path.cwd() / ".env"
+    if env_path.is_file():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if "=" not in line or line.lstrip().startswith("#"):
+                continue
+            key, raw = line.split("=", 1)
+            if key.strip() == name:
+                return raw.strip().strip('"').strip("'")
+    return os.environ.get(name, "")
+
+
 def _load_config() -> dict[str, Any]:
     cfg: dict[str, Any] = {}
     if _CONFIG_PATH.exists():
@@ -28,7 +40,7 @@ def _load_config() -> dict[str, Any]:
     cfg.setdefault("api_base_url", os.environ.get("CTFD_URL", "http://localhost:8000"))
     cfg.setdefault("api_path", os.environ.get("CTFD_API_PATH", "/api/v1"))
     _env_key = cfg.get("access_key_env", "CTFD_TOKEN")
-    cfg.setdefault("token", os.environ.get(_env_key, ""))
+    cfg.setdefault("token", _secret(_env_key))
     cfg.setdefault("timeout", int(os.environ.get("CTFD_TIMEOUT", "30")))
     return cfg
 

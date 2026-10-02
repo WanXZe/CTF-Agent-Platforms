@@ -1,0 +1,30 @@
+[
+  {
+    "repo": "upx/upx",
+    "tag": "v5.2.1",
+    "name": "upx-5.2.1-amd64_linux.tar.xz",
+    "url": "https://github.com/upx/upx/releases/download/v5.2.1/upx-5.2.1-amd64_linux.tar.xz",
+    "sha256": "402162aad30af47e60dbd767fb2e64ca394ace9727ba1f40283641f1d1b91657"
+  },
+  {
+    "repo": "radareorg/radare2",
+    "tag": "6.2.2",
+    "name": "radare2_6.2.2_amd64.deb",
+    "url": "https://github.com/radareorg/radare2/releases/download/6.2.2/radare2_6.2.2_amd64.deb",
+    "sha256": "09234e4139bf8dfcbb7fc1fdb2519859ad516e63c19d3c27d92aaecdf463b1ad"
+  },
+  {
+    "repo": "NationalSecurityAgency/ghidra",
+    "tag": "Ghidra_12.1.4_build",
+    "name": "ghidra_12.1.4_PUBLIC_20260921.zip",
+    "url": "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip",
+    "sha256": "ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db"
+  },
+  {
+    "repo": "skylot/jadx",
+    "tag": "v1.5.6",
+    "name": "jadx-1.5.6.zip",
+    "url": "https://github.com/skylot/jadx/releases/download/v1.5.6/jadx-1.5.6.zip",
+    "sha256": "545ea2be9c242511bc145755cf4bda2485ade42966e096f8b4d3da2a230e8974"
+  }
+]

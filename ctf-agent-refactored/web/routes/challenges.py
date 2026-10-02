@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.skills import PlatformSkillAdapter
 from web.deps import get_platform_adapter
+from core.agent.model_config import category_defaults, snapshot
+from config import Settings
 from web.schemas import (
     ChallengeDetailResponse,
     ChallengeListResponse,
@@ -52,6 +54,8 @@ async def list_challenges(
         kw = keyword.lower()
         challenges = [c for c in challenges if kw in c.name.lower()]
 
+    model_snapshot = snapshot()
+    global_model = Settings().llm_default_model
     items = [
         {
             "id": c.id,
@@ -62,6 +66,7 @@ async def list_challenges(
             "need_container": c.need_container,
             "container_status": c.container_status.value,
             "tags": c.tags,
+            **category_defaults(c.category, model_snapshot, global_model),
         }
         for c in challenges
     ]
@@ -92,6 +97,7 @@ async def get_challenge(
         "description": ch.description,
         "connection_info": ch.connection_info,
         "files": [{"name": f.name, "url": f.url, "ext": f.ext} for f in ch.files],
+        **category_defaults(ch.category),
     })
 
 

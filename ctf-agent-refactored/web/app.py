@@ -36,15 +36,16 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化，关闭时释放资源。"""
     settings = Settings()
+    from core.agent.solve_runner import reconcile_sessions, shutdown_tasks
+    reconcile_sessions()
     logging.basicConfig(level=settings.logging_level)
     logger.info("CTF-Agent Web 启动: %s:%s", settings.web_host, settings.web_port)
     if FRONTEND_DIR.exists():
         logger.info("前端静态文件: %s", FRONTEND_DIR)
     yield
+    await shutdown_tasks()
     # 关闭时释放所有平台适配器资源（默认 + 运行时切换的）
-    from web.deps import _adapter_cache, _default_adapter
-    if _default_adapter:
-        await _default_adapter.close()
+    from web.deps import _adapter_cache
     for adapter in _adapter_cache.values():
         await adapter.close()
     _adapter_cache.clear()

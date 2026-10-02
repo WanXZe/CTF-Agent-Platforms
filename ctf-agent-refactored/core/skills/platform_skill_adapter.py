@@ -8,6 +8,7 @@ Agent 推理层只通过本适配器调用平台能力，不直接写 HTTP 请�
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional
 
@@ -56,6 +57,11 @@ class PlatformSkillAdapter:
             logger.info("使用平台: %s (%s)", self._platform.name, self._platform.display_name)
         return self._platform
 
+    async def _call(self, method: str, *args: Any) -> dict[str, Any]:
+        """Platform skills use blocking curl; keep them off the API event loop."""
+        platform = self._get_platform()
+        return await asyncio.to_thread(platform.call, method, *args)
+
     def switch_platform(self, name: str) -> None:
         """切换到指定平台。"""
         registry = _get_registry()
@@ -85,8 +91,10 @@ class PlatformSkillAdapter:
             container_status=ContainerStatus(data.get("container_status", "not_started")),
             connection_info=str(data.get("connection_info", "")),
             files=[
-                ChallengeFile(name=f.get("name", ""), url=f.get("url", ""), ext=f.get("ext", ""))
-                for f in data.get("files", [])
+                ChallengeFile(name=f.get("name", "") if isinstance(f, dict) else str(f).rsplit("/", 1)[-1],
+                              url=f.get("url", "") if isinstance(f, dict) else str(f),
+                              ext=f.get("ext", "") if isinstance(f, dict) else "")
+                for f in (data.get("files") or [])
             ],
             raw=dict(data.get("raw", {})),
         )
@@ -95,8 +103,7 @@ class PlatformSkillAdapter:
 
     async def list_challenges(self, light: bool = True) -> list[Challenge]:
         """获取全部题目列表。"""
-        platform = self._get_platform()
-        result = platform.call("list_challenges")
+        result = await self._call("list_challenges")
         if not result.get("success"):
             raise PlatformError((result.get("message") or "获取题目列表失败"), code=result.get("code", ""))
 
@@ -118,7 +125,10 @@ class PlatformSkillAdapter:
                     challenges.append(self._to_challenge(cat))
 
         if not light:
-            for ch in challenges:
+            semaphore = asyncio.Semaphore(4)
+
+            async def enrich(ch: Challenge) -> None:
+              async with semaphore:
                 try:
                     detail = await self.get_challenge(ch.id)
                     ch.description = detail.description
@@ -130,6 +140,7 @@ class PlatformSkillAdapter:
                     ch.solved = ch.solved or detail.solved
                 except Exception as e:
                     logger.warning("补全题目 %s 详情失败: %s", ch.id, e)
+            await asyncio.gather(*(enrich(ch) for ch in challenges))
 
         for ch in challenges:
             self._challenge_cache[ch.id] = ch
@@ -139,8 +150,7 @@ class PlatformSkillAdapter:
         """获取单个题目详情。"""
         if not challenge_id:
             raise InvalidParamError("challenge_id 不能为空", field="challenge_id")
-        platform = self._get_platform()
-        result = platform.call("get_challenge", challenge_id)
+        result = await self._call("get_challenge", challenge_id)
         if not result.get("success"):
             cached = self._challenge_cache.get(challenge_id)
             if cached:
@@ -157,8 +167,7 @@ class PlatformSkillAdapter:
         """下载题目附件，返回二进制内容。"""
         if not challenge_id:
             raise InvalidParamError("challenge_id 不能为空", field="challenge_id")
-        platform = self._get_platform()
-        result = platform.call("download_attachment", challenge_id, filename)
+        result = await self._call("download_attachment", challenge_id, filename)
         if not result.get("success"):
             raise PlatformError((result.get("message") or "下载失败"))
         data = result.get("data", {})
@@ -173,8 +182,7 @@ class PlatformSkillAdapter:
         """启动题目容器环境。"""
         if not challenge_id:
             raise InvalidParamError("challenge_id 不能为空", field="challenge_id")
-        platform = self._get_platform()
-        result = platform.call("start_container", challenge_id)
+        result = await self._call("start_container", challenge_id)
         if not result.get("success"):
             raise ContainerError((result.get("message") or "启动容器失败"), challenge_id=challenge_id)
         data = result.get("data", {})
@@ -192,8 +200,7 @@ class PlatformSkillAdapter:
         """停止并回收题目容器环境。"""
         if not challenge_id:
             raise InvalidParamError("challenge_id 不能为空", field="challenge_id")
-        platform = self._get_platform()
-        result = platform.call("stop_container", challenge_id)
+        result = await self._call("stop_container", challenge_id)
         if not result.get("success"):
             raise ContainerError((result.get("message") or "关闭容器失败"), challenge_id=challenge_id)
         if challenge_id in self._challenge_cache:
@@ -211,15 +218,6 @@ class PlatformSkillAdapter:
         if not challenge_id:
             raise InvalidParamError("challenge_id 不能为空", field="challenge_id")
         try:
-            # 优先检查缓存：刚启动时容器处于异步启动中，避免误判为未启动
-            cached = self._challenge_cache.get(challenge_id)
-            if cached and cached.container_status == ContainerStatus.STARTING:
-                return ContainerInfo(
-                    challenge_id=challenge_id,
-                    status=ContainerStatus.STARTING,
-                    connection_info="",
-                    endpoints=None,
-                )
             ch = await self.get_challenge(challenge_id)
             raw = ch.raw or {}
             is_need_check = raw.get("isNeedCheck", False)
@@ -257,8 +255,7 @@ class PlatformSkillAdapter:
             raise InvalidParamError("challenge_id 不能为空", field="challenge_id")
         if not flag or not flag.strip():
             raise InvalidParamError("flag 不能为空", field="flag")
-        platform = self._get_platform()
-        result = platform.call("submit_flag", challenge_id, flag)
+        result = await self._call("submit_flag", challenge_id, flag)
         if not result.get("success"):
             return SubmitResult(status="unknown", message=(result.get("message") or "提交失败"), is_correct=False)
         data = result.get("data", {})

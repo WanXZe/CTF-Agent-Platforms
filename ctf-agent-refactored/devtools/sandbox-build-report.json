@@ -1,0 +1,12 @@
+{
+  "image": "ctf-sandbox:latest",
+  "candidate": "ctf-sandbox:re-tools-20261003",
+  "id": "sha256:1f18183141d2f79e91e317597ecebbbcf1952688b14447a51075bfe22b9fd574",
+  "size_bytes": 4253241440,
+  "created": "2026-10-02T12:41:33.55375744-04:00",
+  "project": "/home/wanxze/Desktop/CTF-Agent-Platforms/ctf-agent-refactored",
+  "build_exit": "0",
+  "rollback_images": [
+    "ctf-sandbox:before-re-tools-20261002-124224 5c1746fb39fe"
+  ]
+}

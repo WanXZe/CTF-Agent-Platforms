@@ -1,0 +1,5 @@
+click==8.5.0
+pycryptodome==3.17
+pyinstxtractor-ng==2026.7.3
+six==1.17.0
+xdis==6.3.0

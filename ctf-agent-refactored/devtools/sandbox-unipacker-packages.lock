@@ -1,0 +1,10 @@
+attrs==26.1.0
+capstone==5.0.9
+cmd2==2.0.0
+colorama==0.4.6
+pefile==2024.8.26
+pyperclip==1.11.0
+unicorn-unipacker==1.0.3b7
+unipacker==1.0.8
+wcwidth==0.9.1
+yara-python==4.5.4

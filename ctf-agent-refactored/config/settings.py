@@ -36,6 +36,9 @@ class YamlConfigSource(PydanticBaseSettingsSource):
         },
         "llm": {
             "default_model": "llm_default_model",
+            "base_url": "llm_base_url",
+            "api_key_env": "llm_api_key_env",
+            "local_base_url": "local_llm_base_url",
             "temperature": "llm_temperature",
             "max_tokens": "llm_max_tokens",
             "timeout": "llm_timeout",
@@ -46,6 +49,8 @@ class YamlConfigSource(PydanticBaseSettingsSource):
         },
         "solver": {
             "max_concurrent_challenges": "max_concurrent_challenges",
+            "token_budget": "solver_token_budget",
+            "max_rounds": "solver_max_rounds",
             "max_attempts_per_challenge": "max_attempts_per_challenge",
             "models": "models",
             "coordinator": "coordinator",
@@ -67,6 +72,8 @@ class YamlConfigSource(PydanticBaseSettingsSource):
             "burst_size": "rate_limit_burst",
         },
         "sandbox": {
+            "mode": "sandbox_mode",
+            "dns": "sandbox_dns",
             "docker_url": "sandbox_docker_url",
             "image": "sandbox_image",
             "memory_limit": "sandbox_memory_limit",
@@ -76,6 +83,9 @@ class YamlConfigSource(PydanticBaseSettingsSource):
             "host": "web_host",
             "port": "web_port",
             "cors_origins": "web_cors_origins",
+        },
+        "local": {
+            "root": "local_root",
         },
         "logging": {
             "level": "logging_level",
@@ -133,7 +143,11 @@ class Settings(BaseSettings):
     gzctf_password: str = ""
 
     # ========== LLM（地址来自 config.yaml，Key 全部来自 .env）==========
-    llm_default_model: str = "qwen3.7-plus"
+    llm_default_model: str = "qwen3:4b"
+    llm_base_url: str = ""
+    llm_api_key_env: str = "GATEWAY_API_KEY"
+    llm_api_key: str = ""
+    local_llm_base_url: str = "http://127.0.0.1:11434/v1"
     llm_temperature: float = 0.7
     llm_max_tokens: int = 4096
     llm_timeout: int = 120
@@ -164,6 +178,10 @@ class Settings(BaseSettings):
 
     # ========== 求解器 ==========
     max_concurrent_challenges: int = 2
+    solver_token_budget: int = 100000
+    solver_allow_flag_submit: bool = False
+    solver_allow_container_start: bool = False
+    solver_max_rounds: int = 20
     max_attempts_per_challenge: int = 3
     models: str = ""
     coordinator: str = "auto"
@@ -184,7 +202,12 @@ class Settings(BaseSettings):
     rate_limit_rps: int = 3
     rate_limit_burst: int = 10
 
+    # ========== 本地题库 ==========
+    local_root: str = ""
+
     # ========== 沙箱 ==========
+    sandbox_mode: str = "auto"          # auto | docker | host
+    sandbox_dns: str = ""
     sandbox_docker_url: str = "unix:///var/run/docker.sock"
     sandbox_image: str = "ctf-sandbox"
     sandbox_memory_limit: str = "16g"

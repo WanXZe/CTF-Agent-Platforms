@@ -10,6 +10,7 @@ Agent 推理层通过工具注册表调用这些工具，实现「推理 ↔ 工
 from __future__ import annotations
 
 import logging
+import base64
 from typing import Any, Callable, Optional
 
 from core.models import ToolResult
@@ -106,7 +107,13 @@ def build_platform_tools(adapter: PlatformSkillAdapter) -> ToolRegistry:
         """下载题目附件。参数：challenge_id(str), filename(str)。"""
         try:
             content = await adapter.download_attachment(challenge_id, filename)
-            return ToolResult.ok(data={"size": len(content), "filename": filename or "attachment"})
+            if len(content) > 65536:
+                return ToolResult.fail("attachment_too_large", "Attachment exceeds 64 KiB model transfer limit", data={"size": len(content)})
+            if b"\x00" in content:
+                preview = {"encoding": "base64", "content": base64.b64encode(content).decode("ascii")}
+            else:
+                preview = {"encoding": "utf-8", "content": content.decode("utf-8", errors="replace")}
+            return ToolResult.ok(data={"size": len(content), "filename": filename or "attachment", **preview})
         except Exception as e:
             return ToolResult.fail("download_error", str(e))
 
