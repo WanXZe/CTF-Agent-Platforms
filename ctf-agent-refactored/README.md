@@ -76,3 +76,10 @@ PYTHONPATH=.:../ctf-platform-skill python3 -m unittest discover -s tests -p 'tes
 ## 本地文件
 
 `config.yaml`、`.env`、题库附件、运行日志、虚拟环境、构建缓存及备份均保留在部署环境中，不提交到仓库。仓库提供 `config.example.yaml` 和 `.env.example` 作为配置模板。
+
+
+## 沙箱镜像与完整构建包
+
+[下载容器镜像和构建包](https://github.com/WanXZe/CTF-Agent-Platforms/releases/tag/sandbox-re-tools-20261003)。
+
+构建源码位于 `devtools/sandbox.Dockerfile`，导入、重建与校验步骤见 [SANDBOX_RELEASE.md](devtools/SANDBOX_RELEASE.md)。构建包包含工具安装资源及基础镜像；不包含应用密钥或题目数据。
