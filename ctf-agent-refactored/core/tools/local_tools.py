@@ -1,13 +1,13 @@
 """Per-challenge workspace tools: bounded file access + command execution.
 
 Execution backend (settings.sandbox_mode):
-  * "auto"   -> docker when the configured sandbox image is present locally,
-                otherwise run on the VM shell ("host")
+  * "auto"   -> docker when the configured sandbox image is present locally;
+                otherwise fail closed (never silently execute on the VM)
   * "docker" -> always docker (image must exist, e.g. a reused CTF image)
   * "host"   -> run directly on the VM in the challenge directory
 
-Docker backend reuses ONE long-lived container per challenge
-(`ctf-agent-<challenge>`), bind-mounting the challenge folder to /workspace,
+Docker backend reuses ONE long-lived container within each solve run,
+bind-mounting a fresh per-run challenge copy to /workspace,
 so repeated commands are cheap and state (installed files, compiled binaries)
 persists between calls.  It is torn down via registry.cleanup().
 """
@@ -63,20 +63,21 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 # 沙箱挂载的不是原始题目目录，而是"净化副本"：QuestionInfo.json（里面存着
 # flag）和 WriteUp.md 一律不拷。否则模型一条 `cat QuestionInfo.json` 或
 # `grep -r 0xGame .` 就能把答案抄出来，"解题"也就没意义了。
-# 副本常驻 /tmp/ctf-agent-workspaces/<题目>，模型产出的脚本都落在那里。
+# 每轮创建独立净化副本；结束后留存用于追溯，但下一轮不会挂载旧副本。
 _WORKSPACE_HOME = Path("/tmp/ctf-agent-workspaces")
 
 
 def stage_workspace(source: Path, slug: str) -> Path:
     """镜像题目目录到沙箱工作区（剔除答案元数据与题解），返回工作区路径。"""
-    dest = _WORKSPACE_HOME / slug
+    safe_slug = _SAFE_CONTAINER_CHARS.sub('-', str(slug))[:40].strip('-') or 'workspace'
+    dest = _WORKSPACE_HOME / f'{safe_slug}-{uuid.uuid4().hex}'
     ignored = {name.lower() for name in _EXCLUDED_NAMES}
 
     def _ignore(_dir: str, names: list[str]) -> set[str]:
         return {n for n in names if n.lower() in ignored or n in {".git", "__pycache__"}}
 
-    dest.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, dest, dirs_exist_ok=True, ignore=_ignore)
+    _WORKSPACE_HOME.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, dest, ignore=_ignore)
     return dest
 
 
@@ -92,6 +93,7 @@ class Workspace:
         self.memory_limit = str(getattr(settings, "sandbox_memory_limit", "16g") or "16g")
         self.cpu_limit = int(getattr(settings, "sandbox_cpu_limit", 2) or 2)
         self.container = ""
+        self.instance_id = uuid.uuid4().hex
         self._backend = ""
         self._lock = asyncio.Lock()
         self._jobs_lock = asyncio.Lock()
@@ -155,14 +157,34 @@ class Workspace:
             self._backend = "host"
         elif self.mode_pref == "docker":
             self._backend = "docker"
+        elif self.mode_pref == "auto":
+            if not await self._image_present():
+                raise RuntimeError(f'沙箱镜像 {self.image or "(未配置)"} 不可用：请检查 Docker 权限或构建镜像；不会回退到宿主机执行')
+            self._backend = "docker"
         else:
-            self._backend = "docker" if await self._image_present() else "host"
+            raise RuntimeError('sandbox.mode 须为 docker、auto 或显式 host')
         return self._backend
+
+    def _audit_system(self, message, **metadata):
+        if self.audit_context:
+            from core.stats import solve_log
+            solve_log.append_log(*self.audit_context, 'system', message, metadata)
+
+    async def prepare(self):
+        backend = await self.backend()
+        message = (f'继续上轮工作区：{self.root}；保留文件，重建隔离容器' if getattr(self, 'restored_from_previous', False)
+                   else f'本轮独立工作区：{self.root}；历史工作区不会挂载到本轮')
+        self._audit_system(message,
+                           workspace=str(self.root), backend=backend)
+        if backend == 'docker':
+            await self._ensure_container()
+        else:
+            self._audit_system('警告：显式 host 模式，命令在 VM 上运行，本轮未启用容器隔离', backend='host')
 
     # ---- docker backend -------------------------------------------------
     def _container_name(self) -> str:
         slug = _SAFE_CONTAINER_CHARS.sub("-", self.root.name)[:40].strip("-")
-        return f"ctf-agent-{slug or 'workspace'}"
+        return f"ctf-agent-{self.instance_id[:16]}-{slug[:28] or 'workspace'}"
 
     async def _ensure_container(self) -> str:
         async with self._lock:
@@ -178,6 +200,8 @@ class Workspace:
             await self._run(["docker", "rm", "-f", name], timeout=60)
             args = [
                 "docker", "run", "-d", "--name", name,
+                "--label", "ctf-agent.managed=true",
+                "--label", f"ctf-agent.instance={self.instance_id}",
                 "-v", f"{self.root}:/workspace", "-w", "/workspace",
                 "--memory", self.memory_limit, "--cpus", str(self.cpu_limit),
             ]
@@ -200,6 +224,9 @@ class Workspace:
                 raise RuntimeError(f"docker run failed: {_truncate(err or out, 500)}")
             self.container = name
             logger.info("sandbox container %s started (%s)", name, self.image)
+            self._audit_system(f'沙箱已启动：Docker / {name} / 镜像 {self.image}',
+                               backend='docker', container=name, container_id=out.strip(), image=self.image,
+                               workspace=str(self.root))
             return name
 
     async def _docker_exec(self, command: str, timeout: int,
@@ -308,6 +335,7 @@ class Workspace:
             raise RuntimeError(f"Sandbox cleanup failed: {_truncate(err or out, 500)}")
         self.container = ""
         logger.info("sandbox container %s removed", name)
+        self._audit_system(f'沙箱已清理：{name}；本轮工作区文件单独保留', backend='docker', container=name, workspace=str(self.root))
 
     def _persist_job(self, job: dict[str, Any], status: str, result: Optional[ToolResult] = None) -> None:
         payload = {key: job[key] for key in ("job_id", "timeout", "stdout_path", "stderr_path")}
@@ -416,7 +444,18 @@ class Workspace:
         return await self.poll_job(job_id, 0)
 
 
-def build_local_tools(challenge, settings: Any, max_bytes: int = 65536) -> ToolRegistry:
+def previous_workspace(challenge):
+    """Compatibility for pre-upgrade sessions, which did not record workspace paths."""
+    local_dir = challenge.raw.get('local_dir')
+    if not local_dir:
+        return None
+    source = Path(local_dir).resolve()
+    slug = _SAFE_CONTAINER_CHARS.sub('-', f'{challenge.id}-{source.name}')[:40].strip('-') or 'workspace'
+    root = _WORKSPACE_HOME / slug
+    return str(root) if root.is_dir() else None
+
+
+def build_local_tools(challenge, settings: Any, max_bytes: int = 65536, *, resume_root=None) -> ToolRegistry:
     """Read/write/execute tools bound to one challenge directory.
 
     目录先经 stage_workspace() 净化：沙箱里既没有 QuestionInfo.json 的 flag
@@ -424,9 +463,16 @@ def build_local_tools(challenge, settings: Any, max_bytes: int = 65536) -> ToolR
     """
     source = Path(challenge.raw["local_dir"]).resolve()
     slug = _SAFE_CONTAINER_CHARS.sub("-", f"{challenge.id}-{source.name}")[:40].strip("-")
-    root = stage_workspace(source, slug or "workspace")
+    if resume_root is not None:
+        root = Path(resume_root).resolve()
+        home = _WORKSPACE_HOME.resolve()
+        if root == home or not root.is_relative_to(home) or not root.is_dir():
+            raise ValueError('上一次工作区不存在或路径不安全，请选择重新开始')
+    else:
+        root = stage_workspace(source, slug or "workspace")
     registry = ToolRegistry()
     workspace = Workspace(root, settings)
+    workspace.restored_from_previous = resume_root is not None
 
     def safe_path(relative: str, *, for_write: bool = False) -> Path:
         path = (root / (relative or "")).resolve()

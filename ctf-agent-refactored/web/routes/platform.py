@@ -12,13 +12,14 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from config import Settings
 from core.skills import PlatformSkillAdapter
 from core.stats import token_stats, solve_log
 from web.deps import get_platform_adapter, get_platform_id
 from core.agent import model_config
+from core.agent.solve_options import MIN_TOKEN_BUDGET, MAX_TOKEN_BUDGET, solve_options
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,8 @@ async def list_models() -> dict:
     """列出全局 config.yaml 中配置的所有模型。"""
     settings = Settings()
     models = model_config.list_models()
-    return {"success": True, "data": models, "default": settings.llm_default_model}
+    return {"success": True, "data": models, "default": settings.llm_default_model,
+            "solve_options": solve_options(settings)}
 
 
 class ModelCreate(BaseModel):
@@ -262,6 +264,8 @@ async def start_unsolved_containers(
 class SolveRequest(BaseModel):
     challenge_id: str
     model: Optional[str] = None
+    token_budget: Optional[int] = Field(default=None, strict=True, ge=MIN_TOKEN_BUDGET, le=MAX_TOKEN_BUDGET)
+    start_mode: Literal['new', 'continue'] = 'new'
 
 
 @router.post("/models/check")
@@ -310,7 +314,8 @@ async def trigger_solve(platform_id: str, challenge_id: str, body: SolveRequest)
     if is_running(platform_id, challenge_id):
         return {"success": True, "data": {"started": False}, "message": "该题正在解题中"}
     try:
-        started = start_solve(platform_id, challenge_id, adapter, model=body.model)
+        started = start_solve(platform_id, challenge_id, adapter, model=body.model,
+                              token_budget=body.token_budget, start_mode=body.start_mode)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"success": True, "data": {"started": started},

@@ -4,9 +4,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -145,14 +147,57 @@ def append_agent_call(platform_id, challenge_id, event, payload, *, run_id='', c
         _save(data)
 
 
-def begin_run(platform_id, challenge_id, model):
+def resume_snapshot(platform_id, challenge_id, max_chars=48000):
+    """Read bounded prior context independently of the UI's cleared/tail window."""
+    with _lock:
+        session = dict(_session(_load(), platform_id, challenge_id))
+        entries = _entries(journal_path(platform_id, challenge_id), 160, session.get('history_after', 0))
+        if not entries:
+            raise ValueError('该题没有可继续的历史日志，请选择重新开始')
+        chunks = []
+        used = 0
+        for entry in reversed(entries):
+            content = re.sub(r'\x1b\[[0-9;?]*[A-Za-z]', '', str(entry.get('content', '')))
+            clipped = content[:3000] + ('\n[本条长输出已截断]' if len(content) > 3000 else '')
+            text = f"[{entry.get('timestamp', '')}] {entry.get('type', '')}: {clipped}"
+            if used + len(text) + 2 > max_chars:
+                break
+            chunks.append(text); used += len(text) + 2
+        history = '\n\n'.join(reversed(chunks))
+        return {'workspace': session.get('workspace'), 'previous_run_id': session.get('run_id'),
+                'history': history, 'history_entries': len(chunks), 'history_chars': len(history)}
+
+
+def set_workspace(platform_id, challenge_id, workspace):
+    with _lock:
+        data = _load()
+        _session(data, platform_id, challenge_id)['workspace'] = str(workspace)
+        _save(data)
+
+
+def begin_run(platform_id, challenge_id, model, *, token_budget=None, start_mode='continue'):
     with _lock:
         data = _load()
         session = _session(data, platform_id, challenge_id)
-        session.update(run_id=uuid.uuid4().hex, model=model, status='running',
+        if start_mode == 'new':
+            journals = [journal_path(platform_id, challenge_id, kind) for kind in ('solve', 'agent')]
+            if any(path.exists() and path.stat().st_size for path in journals):
+                archive = journals[0].parent / 'archives' / f'{time.time_ns():020d}-{uuid.uuid4().hex}'
+                archive.mkdir(parents=True)
+                (archive / 'session.json').write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding='utf-8')
+                for path in journals:
+                    if path.exists():
+                        path.replace(archive / path.name)
+            session['log_count'] = session['agent_count'] = 0
+            session['display_after'] = session['history_after'] = session['agent_display_after'] = 0
+            session.pop('workspace', None)
+        session.update(run_id=uuid.uuid4().hex, model=model, status='running', token_budget=token_budget,
+                       start_mode=start_mode,
                        started_at=time.strftime('%Y-%m-%d %H:%M:%S'))
         _save(data)
-        message = f'开始新一轮解题（模型 {model}），历史日志保留。' if model else '开始新一轮解题，按方向选择默认模型；历史日志保留。'
+        selected = f'模型 {model}' if model else '按方向选择默认模型'
+        message = (f'重新开始解题（{selected}）：当前日志重新记录，旧日志归档保留。' if start_mode == 'new'
+                   else f'接着上次继续（{selected}）：加载历史上下文，日志续写。')
         append_log(platform_id, challenge_id, 'system', message)
         return session['run_id']
 
@@ -219,10 +264,19 @@ def clear_solve_log(platform_id, challenge_id):
 
 
 def iter_journal(platform_id, challenge_id, kind):
-    with _lock:
-        _load()
-    path = journal_path(platform_id, challenge_id, kind)
-    if path.exists():
-        with path.open('rb') as stream:
-            while chunk := stream.read(65536):
-                yield chunk
+    with ExitStack() as stack:
+        with _lock:
+            _load()
+            path = journal_path(platform_id, challenge_id, kind)
+            # Open a stable snapshot before a concurrent fresh start can rotate journals.
+            paths = sorted((path.parent / 'archives').glob(f'*/{kind}.jsonl')) + [path]
+            streams = [(stack.enter_context(journal.open('rb')), journal.stat().st_size)
+                       for journal in paths if journal.exists()]
+        for stream, remaining in streams:
+            while remaining:
+                chunk = stream.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                if chunk:
+                    yield chunk

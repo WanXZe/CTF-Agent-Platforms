@@ -5,7 +5,7 @@ const number = value => Number(value || 0).toLocaleString('zh-CN');
 const labels = {challenges:'赛题库',directions:'方向与模型',models:'模型连接',usage:'调用用量'};
 const statuses = {idle:'未开始',running:'分析中',pausing:'暂停中',paused:'已暂停',cancelling:'取消中',cancelled:'已取消',failed:'失败',needs_human:'等待确认',success:'已完成',interrupted:'已中断',cleanup_failed:'清理失败'};
 const activeStates = new Set(['running','pausing','paused','cancelling']);
-const state = {platform:'',platforms:[],models:[],globalModel:'',directions:[],challenges:[],sessions:[],view:'challenges',detail:null,editor:null,query:'',category:'',solved:'',revision:0,logRevision:0,busy:new Set()};
+const state = {platform:'',platforms:[],models:[],globalModel:'',solveOptions:{token_budget:100000,min_token_budget:1000,max_token_budget:10000000},directions:[],challenges:[],sessions:[],view:'challenges',detail:null,editor:null,query:'',category:'',solved:'',revision:0,logRevision:0,busy:new Set()};
 let pollTimer;
 
 async function api(path, {method='GET',body,platform=state.platform}={}) {
@@ -47,7 +47,7 @@ async function loadWorkspace() {
     api(`/api/solve-sessions?platform_id=${encode(platform)}`,{platform}),api('/api/models',{platform:''})
   ]);
   if (revision !== state.revision || platform !== state.platform) return;
-  Object.assign(state,{challenges:challenges.data,directions:directions.data,sessions:sessions.data,models:models.data,globalModel:models.default});
+  Object.assign(state,{challenges:challenges.data,directions:directions.data,sessions:sessions.data,models:models.data,globalModel:models.default,solveOptions:models.solve_options || state.solveOptions});
   if (!state.detail) render();
 }
 function render() {
@@ -125,7 +125,7 @@ function renderQuestion() {
   $('workspace').innerHTML = `<button class="back-link" data-action="back-questions">← 返回赛题库</button><div class="detail-heading"><span class="question-id">#${escapeHTML(question.id)}</span><h1>${escapeHTML(question.name)}</h1><span class="tag">${escapeHTML(question.model_category)}</span></div>
     <div class="detail-grid"><div class="question-pane"><section class="pane-section"><h3>题目内容</h3><pre class="description">${escapeHTML(question.description || '暂无题目描述。')}</pre><div class="files">${question.files.map(file => `<button data-action="attachment" data-filename="${escapeHTML(file.name)}">↓ ${escapeHTML(file.name)}</button>`).join('') || '<span class="subtle">无附件</span>'}</div></section>
     ${question.need_container ? `<section class="pane-section"><h3>题目环境</h3><div class="container-state" id="environmentInfo">${escapeHTML(question.connection_info || question.container_status || '未启动')}</div><div class="solve-actions"><button class="secondary" data-action="environment-start">启动环境</button><button class="secondary" data-action="environment-status">刷新状态</button><button class="quiet" data-action="environment-stop">停止环境</button></div></section>` : ''}
-    <section class="pane-section"><h3>Agent 解题</h3><p class="subtle">${escapeHTML(question.model_category)} 方向默认：<strong id="directionDefaultLabel">${escapeHTML(question.default_model)}</strong></p><div class="solve-picker"><select id="runModel" aria-label="本轮解题模型">${modelOptions(detail.model,`使用方向默认 · ${question.default_model}`)}</select><button class="secondary" data-action="check-connection">检查</button></div><div class="connection-result" id="connectionResult" role="status"></div><div class="solve-actions"><button class="primary" data-action="start-solve">开始分析</button><button class="secondary" data-action="pause-solve">暂停</button><button class="secondary" data-action="resume-solve">继续</button><button class="danger" data-action="cancel-solve">取消分析</button></div><p class="subtle" id="runStatus" style="margin-top:14px"></p><p class="subtle" style="font-size:10px;margin-top:10px">本轮选择仅对当前任务生效。方向默认值在“方向与模型”页面配置。</p></section>
+    <section class="pane-section"><h3>Agent 解题</h3><p class="subtle">${escapeHTML(question.model_category)} 方向默认：<strong id="directionDefaultLabel">${escapeHTML(question.default_model)}</strong></p><div class="solve-picker"><select id="runModel" aria-label="本轮解题模型">${modelOptions(detail.model,`使用方向默认 · ${question.default_model}`)}</select><button class="secondary" data-action="check-connection">检查</button></div><label class="budget-field" for="runStartMode">启动方式<select id="runStartMode" aria-label="启动方式"><option value="new">重新开始 · 新容器 / 新工作区 / 日志重置</option><option value="continue">接着上次 · 恢复工作区 / 加载历史 / 日志续写</option></select></label><label class="budget-field" for="runTokenBudget">本轮 Token 预算上限<input id="runTokenBudget" type="number" inputmode="numeric" min="${state.solveOptions.min_token_budget}" max="${state.solveOptions.max_token_budget}" step="1" value="${state.solveOptions.token_budget}" aria-label="本轮 Token 预算上限" required></label><p class="subtle budget-help">累计输入 + 输出；范围 ${number(state.solveOptions.min_token_budget)}–${number(state.solveOptions.max_token_budget)}。只影响本轮，不修改全局设置。</p><div class="connection-result" id="connectionResult" role="status"></div><div class="solve-actions"><button class="primary" data-action="start-solve">开始分析</button><button class="secondary" data-action="pause-solve">暂停</button><button class="secondary" data-action="resume-solve">继续</button><button class="danger" data-action="cancel-solve">取消分析</button></div><p class="subtle" id="runStatus" style="margin-top:14px"></p><p class="subtle" style="font-size:10px;margin-top:10px">重新开始：新容器和工作区，当前日志重置，旧记录归档。接着上次：恢复文件、加载有界历史日志，重建容器并续写。暂停/继续则保留当前运行上下文。本轮选择仅对当前任务生效。方向默认值在“方向与模型”页面配置。</p></section>
     <section class="pane-section"><details><summary class="subtle">手动提交 Flag</summary><div class="flag-entry"><input id="flagValue" aria-label="Flag" placeholder="flag{…}" autocomplete="off"><button class="secondary" data-action="submit-flag">提交</button></div></details></section></div>
     <section class="activity-pane"><div class="activity-head"><h3>分析与调用记录</h3><select id="journalKind" aria-label="日志类型"><option value="solve">做题日志</option><option value="agent">Agent 调用日志</option></select></div><div class="log-summary"><span id="journalCount"></span><button class="quiet" data-action="clear-display">清空显示</button></div><div class="terminal" id="journal" tabindex="0" aria-label="题目日志"></div><div class="log-downloads"><button data-action="download-journal" data-kind="solve">↓ 完整做题日志</button><button data-action="download-journal" data-kind="agent">↓ Agent 调用日志</button></div></section></div>`;
   syncSolveControls();
@@ -139,6 +139,8 @@ function syncSolveControls() {
     if (button && ['pause-solve','resume-solve','cancel-solve'].includes(action)) button.hidden = action === 'cancel-solve' ? !active : !available;
   }
   $('runModel').disabled = active;
+  if ($('runTokenBudget')) $('runTokenBudget').disabled = active;
+  if ($('runStartMode')) $('runStartMode').disabled = active;
   $('runStatus').textContent = `任务状态：${statuses[status] || status}${active && state.detail.model ? ` · ${state.detail.model}` : ''}`;
 }
 function updateLogs(log) {
@@ -152,6 +154,8 @@ function updateLogs(log) {
   }
   $('journalCount').textContent = `显示最近 ${entries.length} 条 · 完整记录 ${number(log.log_count)} 条`;
   state.detail.status = log.status || 'idle';
+  if (activeStates.has(state.detail.status) && log.token_budget && $('runTokenBudget')) $('runTokenBudget').value = log.token_budget;
+  if (activeStates.has(state.detail.status) && log.start_mode && $('runStartMode')) $('runStartMode').value = log.start_mode;
   if (activeStates.has(state.detail.status) && log.model && state.models.some(model => model.name === log.model)) {
     state.detail.model = log.model; $('runModel').value = log.model;
   }
@@ -184,7 +188,11 @@ async function download(path,filename,platform=state.platform) {
 async function solveAction(action) {
   const detail = state.detail, platform = detail.platform;
   if (action === 'start-solve') {
-    const result = await api(`/api/solve/${encode(platform)}/${encode(detail.id)}`,{method:'POST',body:{challenge_id:detail.id,model:$('runModel').value || null},platform});
+    const budgetInput = $('runTokenBudget');
+    if (!budgetInput.reportValidity()) throw new Error('请填写有效的整数 Token 预算。');
+    const tokenBudget = Number(budgetInput.value);
+    if (!Number.isInteger(tokenBudget)) throw new Error('Token 预算必须是整数。');
+    const result = await api(`/api/solve/${encode(platform)}/${encode(detail.id)}`,{method:'POST',body:{challenge_id:detail.id,model:$('runModel').value || null,token_budget:tokenBudget,start_mode:$('runStartMode').value},platform});
     if (result.data.started) { detail.status = 'running'; detail.model = $('runModel').value; }
     notify(result.message);
   } else {

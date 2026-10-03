@@ -100,14 +100,32 @@ async def _execute(platform_id: str, challenge_id: str, model: Optional[str], ad
         settings = selected_settings(chosen, config_snapshot, settings)
         solve_log.set_solve_status(platform_id, challenge_id, 'running', model=chosen)
         solve_log.append_log(platform_id, challenge_id, 'system', f'方向：{challenge.category or "未分类"}；本轮模型：{chosen}')
+        solve_log.append_log(platform_id, challenge_id, 'system',
+            f'本轮 Token 预算：{settings.solver_token_budget:,}（累计输入 + 输出；仅对本轮生效）',
+            {'token_budget': settings.solver_token_budget})
         if platform_id == "local":
-            tools = build_local_tools(challenge, settings)
+            if getattr(control, 'start_mode', 'new') == 'continue':
+                from core.tools.local_tools import previous_workspace
+                previous = control.resume_workspace or previous_workspace(challenge)
+                tools = build_local_tools(challenge, settings, resume_root=previous) if previous else build_local_tools(challenge, settings)
+                if previous is None:
+                    solve_log.append_log(platform_id, challenge_id, 'system', '未找到上轮工作区：本轮创建新工作区，但仍加载历史解题日志')
+            else:
+                tools = build_local_tools(challenge, settings)
             if getattr(tools, 'workspace', None):
                 tools.workspace.audit_context = (platform_id, challenge_id)
+                solve_log.set_workspace(platform_id, challenge_id, tools.workspace.root)
         else:
             tools = build_platform_tools(adapter)
-        coordinator = Coordinator(settings, tools, platform_id=platform_id, control=control)
+        if getattr(control, 'resume_context', ''):
+            solve_log.append_log(platform_id, challenge_id, 'system',
+                f'已加载历史日志上下文：{len(control.resume_context):,} 字符；长输出和过早记录按上下文限额缩略，完整日志仍可下载',
+                {'resume_context_chars': len(control.resume_context)})
         try:
+            workspace = getattr(tools, 'workspace', None)
+            if workspace is not None and getattr(workspace, 'prepare', None):
+                await workspace.prepare()
+            coordinator = Coordinator(settings, tools, platform_id=platform_id, control=control)
             return await coordinator.solve_challenge(challenge)
         finally:
             cleanup = getattr(tools, "cleanup", None)
@@ -133,7 +151,8 @@ async def _execute(platform_id: str, challenge_id: str, model: Optional[str], ad
         return {"status": "failed", "message": str(exc)}
 
 
-def start_solve(platform_id: str, challenge_id: str, adapter: Any, model: Optional[str] = None) -> bool:
+def start_solve(platform_id: str, challenge_id: str, adapter: Any, model: Optional[str] = None,
+                token_budget: Optional[int] = None, start_mode: str = 'new') -> bool:
     """启动后台解题任务；若同题正在跑则返回 False。"""
     key = task_key(platform_id, challenge_id)
     if is_running(platform_id, challenge_id):
@@ -143,10 +162,20 @@ def start_solve(platform_id: str, challenge_id: str, adapter: Any, model: Option
     from core.agent.model_config import snapshot
     config_snapshot = snapshot()
     settings = selected_settings(model, config_snapshot)
+    from core.agent.solve_options import validate_token_budget
+    budget = validate_token_budget(token_budget)
+    if budget is not None:
+        settings.solver_token_budget = budget
+    if start_mode not in ('new', 'continue'):
+        raise ValueError('启动方式须为 new 或 continue')
     control = SolveControl(platform_id, challenge_id)
-    _controls[key] = control
     from core.stats import solve_log
-    control.run_id = solve_log.begin_run(platform_id, challenge_id, model or '')
+    previous = solve_log.resume_snapshot(platform_id, challenge_id) if start_mode == 'continue' else {}
+    control.start_mode = start_mode
+    control.resume_context = previous.get('history', '')
+    control.resume_workspace = previous.get('workspace')
+    control.run_id = solve_log.begin_run(platform_id, challenge_id, model or '', token_budget=settings.solver_token_budget, start_mode=start_mode)
+    _controls[key] = control
     task = asyncio.create_task(_execute(platform_id, challenge_id, model, adapter, control, settings, config_snapshot))
     _tasks[key] = task
 

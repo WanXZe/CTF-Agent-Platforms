@@ -192,7 +192,9 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
             await solve_runner._tasks['local:1']
             await asyncio.sleep(0)
         self.assertEqual(observed[-1][0], 'model-a')
-        self.assertIn('previous attempt', [entry['content'] for entry in solve_log.get_solve_log('local', '1')['logs']])
+        # Explicit fresh starts reset the visible journal, but never destroy archived attempts.
+        self.assertNotIn('previous attempt', [entry['content'] for entry in solve_log.get_solve_log('local', '1')['logs']])
+        self.assertIn('previous attempt', b''.join(solve_log.iter_journal('local', '1', 'solve')).decode())
 
     async def test_old_question_defaults_are_ignored_and_unknown_directions_fall_back(self):
         config = yaml.safe_load((self.root / 'config.yaml').read_text())
