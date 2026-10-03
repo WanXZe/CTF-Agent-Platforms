@@ -83,3 +83,11 @@ PYTHONPATH=.:../ctf-platform-skill python3 -m unittest discover -s tests -p 'tes
 [下载容器镜像和构建包](https://github.com/WanXZe/CTF-Agent-Platforms/releases/tag/sandbox-re-tools-20261003)。
 
 构建源码位于 `devtools/sandbox.Dockerfile`，导入、重建与校验步骤见 [SANDBOX_RELEASE.md](devtools/SANDBOX_RELEASE.md)。构建包包含工具安装资源及基础镜像；不包含应用密钥或题目数据。
+
+## 模型连接与代理
+
+模型 HTTP 客户端不继承系统代理。公网模型需要代理时，可在 `config.yaml` 的 `llm` 节配置 `proxy_url: socks5h://<代理主机>:<端口>`，或在不提交的 `.env` 中设置 `LLM_PROXY_URL`。环境变量优先。SOCKS 支持通过项目依赖 `httpx[socks]` 安装；也可运行 `python3 -m pip install 'httpx[socks]>=0.28.1'`。
+
+`socks5h` 经代理解析公网模型域名，避免 VM 的旧 `/etc/hosts` 中继映射造成直连失败；TLS 校验保持开启。回环和私有 IP、`localhost`、`.local` 地址自动绕过代理。
+
+`http://127.0.0.1:11434/v1` 指 **Agent 后端所在机器** 的 Ollama，不是浏览器所在机器。若模型运行在宿主机，请先确认 Ollama 已启动并监听 VM 可达的地址，再在模型页面修改接口地址。模型页面的“检查连接”只读取模型列表，不消耗生成额度。

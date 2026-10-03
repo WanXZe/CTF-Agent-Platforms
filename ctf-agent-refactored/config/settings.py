@@ -37,6 +37,7 @@ class YamlConfigSource(PydanticBaseSettingsSource):
         "llm": {
             "default_model": "llm_default_model",
             "base_url": "llm_base_url",
+            "proxy_url": "llm_proxy_url",
             "api_key_env": "llm_api_key_env",
             "local_base_url": "local_llm_base_url",
             "temperature": "llm_temperature",
@@ -145,6 +146,7 @@ class Settings(BaseSettings):
     # ========== LLM（地址来自 config.yaml，Key 全部来自 .env）==========
     llm_default_model: str = "qwen3:4b"
     llm_base_url: str = ""
+    llm_proxy_url: str = ""  # Explicit proxy for public endpoints; private/loopback bypass it.
     llm_api_key_env: str = "GATEWAY_API_KEY"
     llm_api_key: str = ""
     local_llm_base_url: str = "http://127.0.0.1:11434/v1"

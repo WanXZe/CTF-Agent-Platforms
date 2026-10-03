@@ -13,9 +13,11 @@ A keyless loopback endpoint (local Ollama) is the only case allowed to run witho
 from __future__ import annotations
 
 import logging
+import ipaddress
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -55,11 +57,30 @@ class LocalModel:
 
     def _http(self):
         if self._client is None:
-            self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(self.settings.llm_timeout, connect=10.0),
-                trust_env=False,
-            )
+            options = {"timeout": httpx.Timeout(self.settings.llm_timeout, connect=10.0), "trust_env": False}
+            proxy = self._proxy_url()
+            if proxy:
+                options["proxy"] = proxy
+            try:
+                self._client = httpx.AsyncClient(**options)
+            except ImportError as exc:
+                raise ValueError('SOCKS 代理依赖未安装，请运行 python3 -m pip install "httpx[socks]"') from exc
         return self._client
+
+    def _proxy_url(self) -> str:
+        """Use only explicit proxy settings, never send LAN/local models to a proxy."""
+        host = (urlsplit(self._base_url()).hostname or "").lower().rstrip(".")
+        if host == "localhost" or host.endswith((".localhost", ".local")):
+            return ""
+        try:
+            if not ipaddress.ip_address(host).is_global:
+                return ""
+        except ValueError:
+            pass  # Public hostnames must be resolved by the SOCKS proxy, not VM /etc/hosts.
+        proxy = str(getattr(self.settings, "llm_proxy_url", "") or "").strip()
+        if proxy and urlsplit(proxy).scheme not in ("http", "https", "socks5", "socks5h"):
+            raise ValueError("模型代理地址须使用 http(s) 或 socks5(h)")
+        return proxy
 
     async def aclose(self):
         if self._client is not None:
@@ -67,14 +88,23 @@ class LocalModel:
             self._client = None
 
     def _connection_error(self, exc):
-        if not isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        if not isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ProxyError)):
             return ValueError(
                 f"模型请求中断：{self._endpoint(self._base_url())}（{type(exc).__name__}）。"
                 "请检查服务响应时间和网络稳定性；服务端可能仍在处理本次请求。"
             )
+        host = (urlsplit(self._base_url()).hostname or "").lower().rstrip(".")
+        if host in ("localhost", "127.0.0.1", "::1"):
+            return ValueError(
+                f"模型连接失败：{self._endpoint(self._base_url())}（{type(exc).__name__}）。"
+                "127.0.0.1/localhost 指运行 Agent 后端的机器，不是浏览器所在的宿主机；"
+                "请在后端机器启动模型服务，或将接口地址修改为模型服务器的 IP。"
+                "连接失败尚未进入模型推理。"
+            )
         return ValueError(
             f"模型连接失败：{self._endpoint(self._base_url())}（{type(exc).__name__}）。"
-            "请检查服务是否启动、VM DNS 与宿主机中继是否可达；连接失败尚未进入模型推理。"
+            "请检查服务是否启动、VM DNS、/etc/hosts 与代理是否可达；"
+            "公网模型可通过 llm.proxy_url 或 LLM_PROXY_URL 配置代理。连接失败尚未进入模型推理。"
         )
 
     async def probe(self):

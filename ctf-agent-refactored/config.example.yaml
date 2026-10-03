@@ -6,6 +6,7 @@ platform:
 llm:
   default_model: qwen3:4b
   base_url: http://127.0.0.1:11434/v1
+  proxy_url: ""  # Public endpoints only; LAN/loopback endpoints bypass this proxy.
   api_key_env: ""
   local_base_url: http://127.0.0.1:11434/v1
   temperature: 0.7
